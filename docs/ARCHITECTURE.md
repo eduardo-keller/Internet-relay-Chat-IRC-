@@ -1,0 +1,340 @@
+# ARCHITECTURE
+
+**This file is the contract.** Two developers work in two separate AI sessions
+that cannot see each other's decisions. This document plus `TASKS.md` are the
+only shared brain. If you change anything in here, say so in the PR — a change
+here is a change to the other person's assumptions.
+
+Source of truth for requirements: [`ft_irc_requirements.md`](ft_irc_requirements.md).
+If this file ever disagrees with the subject, the subject wins.
+
+---
+
+## 1. Core design principle
+
+**Logic takes strings and objects. Logic never touches file descriptors.**
+
+Everything follows from this:
+
+- The parser, the validation helpers, the `Channel` model, the read-buffer
+  reassembly, and the registration state machine are all testable with
+  constructed strings, before a single socket exists.
+- Only accept / recv / send / poll / disconnect are genuinely network code.
+- A command handler that wants to reach the world calls a `Server` method. It
+  never sees an `int fd`.
+
+If you find yourself needing an fd inside a handler, the seam is wrong — fix
+the seam, don't smuggle the fd through.
+
+---
+
+## 2. Hard conventions
+
+| Rule | Detail |
+|---|---|
+| Standard | C++98 only. No `auto`, `nullptr`, range-for, `std::to_string`, `<unordered_map>`, lambdas, `>>` without a space in nested templates. Use `utils::toString` instead of `std::to_string`. |
+| Flags | `c++ -Wall -Wextra -Werror -std=c++98`. Warnings are build failures; do not silence them with casts you don't understand. |
+| Libraries | Standard library only. No Boost, no external anything. |
+| I/O | Exactly **one** `poll()` for every fd, including the listening socket. Reading or writing any fd without going through that poll is an automatic 0. |
+| Blocking | Every socket is `O_NONBLOCK`. Never assume `send()` wrote everything — that is what `Client`'s output buffer is for. |
+| Line endings | Every message the server sends ends with `\r\n`. |
+| CRLF ownership | `Server::sendToClient` appends `\r\n` **itself**. Never include it in a string you pass to it. |
+| Crashes | The server must never crash or exit unexpectedly. Every `recv`/`send`/`accept` return value is checked. No unchecked `.at()`, no dereferenced `NULL`, no `std::vector` invalidated mid-iteration. |
+| Naming | Code, identifiers, comments and commit messages in **English**. Coordination docs (`PLANO.md`, `TASKS.md`) in Portuguese. |
+
+---
+
+## 3. Modules and ownership
+
+| Module | Files | Owner | Notes |
+|---|---|---|---|
+| Parsed message | `Message.hpp` | shared | Parser output struct + `parseMessage`. |
+| Utilities | `Utils.hpp` | shared middle | Validation, casemapping, split, int conversion. Grab these when blocked. |
+| Client | `Client.hpp` | transport | fd, identity, registration flags, read + write buffers. |
+| Server | `Server.hpp` | transport | Socket setup, the poll loop, the seam. |
+| Channel | `Channel.hpp` | domain | Members, operators, invites, modes i/t/k/l. |
+| Commands | `Command.hpp` | split | `cmdPass/Nick/User/Quit/Ping/Pong` = transport. `cmdJoin/Part/Privmsg/Kick/Invite/Topic/Mode` = domain. |
+| Replies | `Replies.hpp` | shared | Numeric codes and the two builders. Nobody invents a format. |
+
+**The poll loop itself is built jointly in one session** — see `PLANO.md`,
+Phase 2. It is the most novel and most-probed piece; both of us need to be able
+to explain it line by line.
+
+### What is *not* in the contract
+
+Private and free to change without asking: the read-buffer internals behind
+`Client::appendToReadBuffer` / `extractCommand`, the parser's internals, and
+everything in `Server`'s private section. Only the public shapes above are
+negotiated.
+
+### Ownership of memory
+
+`Server` owns every `Client` and every `Channel` (it `new`s and `delete`s them).
+`Channel` stores **non-owning** `Client*`. A client must therefore be removed
+from every channel *before* it is deleted — that is what
+`Server::disconnectClient` is for. After you call `disconnectClient`, the
+`Client&` you were holding is dangling: return from the handler immediately.
+
+The invite list stores **nicknames**, not pointers, so it can never dangle.
+
+---
+
+## 4. The seam
+
+The complete list of what a command handler may call on `Server`:
+
+```cpp
+Client  *findClientByNick(const std::string &nickname);
+Channel *findChannel(const std::string &name);
+Channel *getOrCreateChannel(const std::string &name);
+void     removeChannel(const std::string &name);
+void     sendToClient(Client &client, const std::string &line);
+void     broadcastToChannel(Channel &channel, const std::string &line,
+                            const Client *except);
+void     disconnectClient(Client &client, const std::string &reason);
+const std::string &getPassword() const;
+const std::string &getServerName() const;
+```
+
+That is the whole surface. Every method on it is a coupling point between the
+two of us — adding one is a conversation, not a commit.
+
+### Handler signature
+
+```cpp
+typedef void (*CommandHandler)(Server &server, Client &sender,
+                               const Message &msg);
+```
+
+Dispatch is `std::map<std::string, CommandHandler>`, keyed by the **uppercased**
+command name (IRC commands are case-insensitive). No command class hierarchy,
+no factory. A map lookup is the entire mechanism.
+
+The dispatcher, not the handler, enforces registration: if
+`!sender.isRegistered()` and the command is not `PASS`/`NICK`/`USER`/`QUIT`/
+`PING`/`CAP`, reply `451 ERR_NOTREGISTERED` and stop.
+
+---
+
+## 5. Message grammar
+
+```
+[ ':' prefix SPACE ] command *( SPACE middle ) [ SPACE ':' trailing ]
+```
+
+- Max 512 bytes **including** `\r\n`.
+- The **trailing** parameter begins at the first `" :"` and runs to end of
+  line, spaces included. It is the last element of `params`, with the `:`
+  stripped. `hasTrailing` is kept because `":"` alone is a legal empty
+  trailing param and must be distinguishable from no param at all.
+- Clients normally send no prefix; the server adds one on everything it
+  relays.
+
+```
+"PRIVMSG #chan :hello world"   -> cmd=PRIVMSG params=["#chan","hello world"]
+"JOIN #a,#b key1,key2"         -> cmd=JOIN    params=["#a,#b","key1,key2"]
+"MODE #chan +o bob"            -> cmd=MODE    params=["#chan","+o","bob"]
+```
+
+Malformed input yields an empty `command`: ignore the line, do not reply.
+
+### Casemapping (RFC 2812 §2.2)
+
+Nicknames and channel names are case-insensitive, and `{}|^` are the lowercase
+forms of `[]\~`. Plain `std::tolower` is **wrong** here — use
+`utils::toIrcLower`.
+
+---
+
+## 6. Reply formats
+
+Two shapes, both built in `Replies.hpp`, neither ending in CRLF:
+
+```
+:<servername> <code> <target> <args>        numeric(...)
+:<nick>!<user>@<host> <COMMAND> <args>      fromClient(...)
+```
+
+`<target>` is the recipient's nickname, or `*` when they are not registered yet.
+
+### Numerics we use
+
+Taken from **RFC 2812 §5**. The column shows everything after `<target>`.
+Do not invent codes and do not reword these strings.
+
+| Code | Name | Arguments after target |
+|---|---|---|
+| 001 | RPL_WELCOME | `:Welcome to the Internet Relay Network <nick>!<user>@<host>` |
+| 002 | RPL_YOURHOST | `:Your host is <servername>, running version <ver>` |
+| 003 | RPL_CREATED | `:This server was created <date>` |
+| 004 | RPL_MYINFO | `<servername> <version> <user modes> <channel modes>` |
+| 324 | RPL_CHANNELMODEIS | `<channel> <mode> <mode params>` |
+| 331 | RPL_NOTOPIC | `<channel> :No topic is set` |
+| 332 | RPL_TOPIC | `<channel> :<topic>` |
+| 341 | RPL_INVITING | `<channel> <nick>` — see note below |
+| 353 | RPL_NAMREPLY | `= <channel> :<prefixed nicks separated by spaces>` |
+| 366 | RPL_ENDOFNAMES | `<channel> :End of NAMES list` |
+| 401 | ERR_NOSUCHNICK | `<nickname> :No such nick/channel` |
+| 403 | ERR_NOSUCHCHANNEL | `<channel> :No such channel` |
+| 404 | ERR_CANNOTSENDTOCHAN | `<channel> :Cannot send to channel` |
+| 411 | ERR_NORECIPIENT | `:No recipient given (<command>)` |
+| 412 | ERR_NOTEXTTOSEND | `:No text to send` |
+| 421 | ERR_UNKNOWNCOMMAND | `<command> :Unknown command` |
+| 431 | ERR_NONICKNAMEGIVEN | `:No nickname given` |
+| 432 | ERR_ERRONEUSNICKNAME | `<nick> :Erroneous nickname` |
+| 433 | ERR_NICKNAMEINUSE | `<nick> :Nickname is already in use` |
+| 441 | ERR_USERNOTINCHANNEL | `<nick> <channel> :They aren't on that channel` |
+| 442 | ERR_NOTONCHANNEL | `<channel> :You're not on that channel` |
+| 443 | ERR_USERONCHANNEL | `<user> <channel> :is already on channel` |
+| 451 | ERR_NOTREGISTERED | `:You have not registered` |
+| 461 | ERR_NEEDMOREPARAMS | `<command> :Not enough parameters` |
+| 462 | ERR_ALREADYREGISTRED | `:Unauthorized command (already registered)` |
+| 464 | ERR_PASSWDMISMATCH | `:Password incorrect` |
+| 471 | ERR_CHANNELISFULL | `<channel> :Cannot join channel (+l)` |
+| 472 | ERR_UNKNOWNMODE | `<char> :is unknown mode char to me` |
+| 473 | ERR_INVITEONLYCHAN | `<channel> :Cannot join channel (+i)` |
+| 475 | ERR_BADCHANNELKEY | `<channel> :Cannot join channel (+k)` |
+| 482 | ERR_CHANOPRIVSNEEDED | `<channel> :You're not channel operator` |
+
+> **462 is spelled `ERR_ALREADYREGISTRED` in the RFC** — the missing `E` is in
+> the standard, not a typo of ours.
+
+> **Two codes where RFC 1459 and RFC 2812 disagree.** For 341, RFC 2812 says
+> `<channel> <nick>` while RFC 1459 says `<nick> <channel>`, and most real
+> servers follow 1459. For 366, RFC 2812 says `End of NAMES list` while much
+> deployed software sends `End of /NAMES list`. Both are cosmetic to irssi.
+> **Pick one, verify against irssi in Phase 3, and write the decision here.**
+
+### Non-numeric messages the server relays
+
+Sent with `fromClient(...)`, prefixed with the *originating* client:
+
+```
+:nick!user@host JOIN #chan
+:nick!user@host PART #chan :reason
+:nick!user@host PRIVMSG #chan :text
+:nick!user@host PRIVMSG othernick :text
+:nick!user@host KICK #chan victim :reason
+:nick!user@host TOPIC #chan :new topic
+:nick!user@host MODE #chan +o bob
+:nick!user@host NICK :newnick
+:nick!user@host QUIT :reason
+```
+
+Server-originated, not client-prefixed:
+
+```
+PING :<token>                    server -> client
+:<servername> PONG <servername> :<token>    reply to a client PING
+ERROR :<reason>                  sent immediately before we close a socket
+```
+
+### JOIN success sequence
+
+The exact order irssi expects. Getting this wrong is the usual reason a
+channel window opens empty:
+
+```
+:nick!user@host JOIN #chan          (broadcast to all members, sender included)
+:server 332 nick #chan :<topic>     (or 331 if no topic)
+:server 353 nick = #chan :@op nick2 nick3
+:server 366 nick #chan :End of NAMES list
+```
+
+In 353, channel operators are prefixed with `@`. We do not implement voice, so
+no `+` prefixes.
+
+---
+
+## 7. Registration flow
+
+`PASS` → `NICK` → `USER`, then the welcome burst. A client is registered when
+all three of `hasPass`, `hasNick`, `hasUser` are true.
+
+Rules:
+
+- `PASS` before registration only; after registration reply 462.
+- Wrong password → 464, then disconnect.
+- If `NICK`/`USER` arrive without a correct `PASS` first, the client can never
+  register. Reply 451 and keep the connection until they get it right or quit.
+- On the transition to registered, send **001, 002, 003, 004** in that order.
+  irssi treats 001 as "connected"; without it, it will sit waiting.
+- Nickname collisions are case-insensitive (`utils::equalsIgnoreCase`) → 433.
+
+### What irssi actually does on connect
+
+Test against these, not against a clean-room reading of the RFC:
+
+1. Sends `CAP LS 302` **before** `PASS`. We do not implement capabilities.
+   Either ignore `CAP` silently or reply `421`. Do **not** treat it as a
+   registration step and do **not** crash on it.
+2. Sends `PASS`, `NICK`, `USER` back to back — often in a **single TCP packet**.
+   The read buffer must split that into three commands.
+3. Sends `PING` periodically and expects a `PONG` with the same token. Miss it
+   and irssi eventually reports a timeout.
+4. Sends `QUIT :reason` on `/quit`. Broadcast it to every channel the client
+   was in, then close.
+
+`PING`/`PONG`, `QUIT` and `CAP` are not in the subject's command list, but the
+subject requires that the reference client "connect without encountering any
+error". These are what that costs in practice.
+
+---
+
+## 8. Channel modes
+
+| Mode | Parameter | Meaning |
+|---|---|---|
+| `i` | none | Invite-only. JOIN without an invite → 473. |
+| `t` | none | Only operators may change the topic → 482. |
+| `k` | key (on set) | Channel key. Wrong or missing key → 475. |
+| `o` | nickname | Grant/revoke operator. Target must be a member → 441. |
+| `l` | limit (on set) | User limit. Channel full → 471. |
+
+- Only channel operators may run `MODE`, `KICK`, `INVITE`, and `TOPIC` when
+  `+t` → otherwise 482.
+- The first user to `JOIN` a new channel becomes its operator.
+- A mode string may carry several flags (`+it`, `-ik`). Parameters are consumed
+  left to right, only by the flags that take one. Unknown flag → 472.
+- Removing a mode that takes a parameter (`-k`, `-l`) does not require one.
+- Broadcast every successful change as `:nick!user@host MODE #chan +o bob`.
+
+---
+
+## 9. Testing — two layers, neither optional
+
+**Inner loop (fast, `make test`).** Constructed-string unit tests. Proves the
+logic is internally consistent. Run it constantly.
+
+**Outer loop (slow, `nc` and irssi).** Proves protocol conformance: numerics,
+prefixes, trailing params, CRLF, the JOIN sequence.
+
+> A parser can pass every test we write for it and still disagree with irssi.
+> Unit tests prove we are consistent, not that we are correct. Only the RFC and
+> the real client prove correctness.
+
+Partial-packet test required by the subject:
+
+```sh
+nc -C 127.0.0.1 6667
+com<Ctrl+D>man<Ctrl+D>d<Enter>
+```
+
+The server must see one command, `command`, not three fragments.
+
+---
+
+## 10. Working with AI on this project
+
+Use it to explain concepts, review code we wrote, and generate throwaway test
+scripts. Do not paste in generated files we have not read: the evaluation
+requires either of us to explain any line, and "the AI wrote it" is a failed
+defense.
+
+Be actively skeptical on exactly two things:
+
+1. **Numerics.** Models confidently invent codes and reword replies. Check
+   every one against the table above and against irssi.
+2. **C++98.** Models drift into C++11 constantly — `auto`, `nullptr`,
+   `to_string`, range-for, brace init. The compiler catches it; read the
+   suggestion before you accept it.

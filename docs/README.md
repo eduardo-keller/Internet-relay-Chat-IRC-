@@ -1,0 +1,166 @@
+# ft_irc
+
+An IRC server written in C++98 for 42 School. Mandatory part only — no bonus.
+
+Reference client: **irssi**.
+
+## Build
+
+```sh
+make            # builds ./ircserv
+make test       # builds and runs the unit tests
+make clean      # removes object files
+make fclean     # removes object files and binaries
+make re         # fclean + all
+```
+
+Compiled with `c++ -Wall -Wextra -Werror -std=c++98`.
+
+## Run
+
+```sh
+./ircserv <port> <password>
+```
+
+- `port` — TCP port to listen on (1024–65535)
+- `password` — the password every client must send with `PASS`
+
+```sh
+./ircserv 6667 secret
+```
+
+Connect with irssi:
+
+```sh
+irssi
+/connect localhost 6667 secret
+/join #test
+```
+
+Or with netcat, for raw protocol work:
+
+```sh
+nc -C 127.0.0.1 6667
+PASS secret
+NICK alice
+USER alice 0 * :Alice
+JOIN #test
+PRIVMSG #test :hello
+```
+
+## Testing
+
+### Two binaries, two `main()` functions
+
+A C++ program can have exactly one `main()`, and this repo has two files that
+define one. The Makefile keeps them apart:
+
+| Binary | Built from | Entry point |
+|---|---|---|
+| `ircserv` | `src/*.cpp` | `main()` in `src/main.cpp` |
+| `run_tests` | `tests/*.cpp` + `src/*.cpp` **minus `main.o`** | `main()` in `tests/test_main.cpp` |
+
+The exclusion is this line in the Makefile:
+
+```make
+LIB_OBJS := $(filter-out $(OBJ_DIR)/main.o, $(OBJS))
+```
+
+Without it the linker sees two `main()`s and fails with
+`multiple definition of main`. **Consequence: anything written inside
+`main.cpp` is unreachable from the tests.** Real logic goes in `Server.cpp`,
+`Channel.cpp`, `Utils.cpp` — never in `main.cpp`.
+
+### What each entry point does
+
+`src/main.cpp` validates the command line and exits. Three checks, then a
+placeholder message. It will be replaced in Phase 2 by
+`Server server(port, password); server.run();`.
+
+Its seven `#include`s are deliberate: nothing calls into them, but they force
+the compiler to parse every contract header on every build, so a syntax error
+or a C++11 slip in someone else's header breaks `make` immediately instead of
+three days later. It still links, because declarations without definitions only
+fail at link time *if something calls them*.
+
+`tests/test_main.cpp` is a homemade harness — no framework. `check(bool, name)`
+and `checkEqual(actual, expected, name)` bump a pass/fail counter and print one
+line each; `checkEqual` prints both strings on failure so the difference is
+visible. `main()` returns 0 if everything passed and 1 otherwise, which is what
+makes `make test` usable as a gate.
+
+### Exercising `ircserv`
+
+`echo $?` prints the exit status of the previous command: 0 means success,
+non-zero means failure. Evaluators check this.
+
+| Command | Output | Exit |
+|---|---|---|
+| `./ircserv` | `Usage: ./ircserv <port> <password>` | 1 |
+| `./ircserv 6667` | `Usage: ...` | 1 |
+| `./ircserv 6667 secret extra` | `Usage: ...` | 1 |
+| `./ircserv abc secret` | `Error: port must be a number between 1024 and 65535` | 1 |
+| `./ircserv 80 secret` | `Error: port must be ...` | 1 |
+| `./ircserv 99999 secret` | `Error: port must be ...` | 1 |
+| `./ircserv 6667 ""` | `Error: password must not be empty` | 1 |
+| `./ircserv 6667 secret` | `ircserv: would listen on port 6667 (not implemented yet)` | 0 |
+
+All at once:
+
+```sh
+for a in "" "6667" "abc secret" "80 secret" "99999 secret" "6667 secret"; do
+  printf '%-26s -> ' "ircserv $a"
+  eval "./ircserv $a" >/dev/null 2>&1
+  echo "exit=$?"
+done
+```
+
+### Running the unit tests
+
+```sh
+make test        # build and run in one step
+```
+
+When iterating, split it so you are not rebuilding to re-run:
+
+```sh
+make run_tests   # build only
+./run_tests      # run only
+echo $?          # 0 = all green
+```
+
+### Adding a test
+
+A test can only call a function that has a **definition** in `src/`.
+`include/Utils.hpp` currently declares `utils::toIrcLower` but no
+`src/Utils.cpp` defines it, so a test calling it fails at *link* time with
+`undefined reference to utils::toIrcLower`. That is not a broken Makefile — it
+is the missing file. Always write the `src/*.cpp` first, then the test.
+
+```cpp
+// in tests/test_main.cpp, inside main()
+checkEqual(utils::toIrcLower("Nick[42]"), "nick{42}", "casemapping [] -> {}");
+check(utils::isValidNickname("alice"),  "alice is valid");
+check(!utils::isValidNickname("4lice"), "nick cannot start with a digit");
+```
+
+New files such as `tests/test_parser.cpp` are picked up automatically —
+`tests/*.cpp` is globbed, so no Makefile edit is needed. Do not put a second
+`main()` in them.
+
+## Layout
+
+`src/` holds the implementation and `include/` the headers, one class per file.
+The design has a single organising rule: **logic never touches file
+descriptors**. `Message`, `Channel`, the validation helpers in `Utils`, and the
+buffering inside `Client` all operate on strings and objects, which makes them
+testable without a socket — those tests live in `tests/` and run via
+`make test`. Only `Server` does real I/O: it owns the listening socket, the
+single `poll()` loop over every fd, and the client and channel registries.
+Command handlers sit in between: they receive a parsed `Message` and reach the
+network only through a small, deliberately minimal set of `Server` methods.
+
+The contract between those pieces — module ownership, the handler signature,
+and every reply numeric we emit — is documented in
+[ARCHITECTURE.md](ARCHITECTURE.md). Planning and task tracking are in
+[PLANO.md](PLANO.md) and [TASKS.md](TASKS.md).

@@ -1,0 +1,14 @@
+# build artifacts
+obj/
+*.o
+*.d
+
+# binaries
+ircserv
+run_tests
+
+# editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+*.swp

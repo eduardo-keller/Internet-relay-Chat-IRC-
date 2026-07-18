@@ -1,0 +1,130 @@
+# TASKS — ft_irc
+
+Superfície de sincronização diária entre as duas sessões de IA. **Atualize no
+mesmo commit que muda o código.**
+
+Rótulos em português; identificadores, nomes de arquivo e de comandos em inglês
+(são artefatos do código).
+
+**Status:** `todo` → `doing` → `done` (funciona e tem teste) → `integrated`
+(mergeado na `main` via PR, revisado pelo colega).
+
+**Donos:** `TRANSPORT` (Eduardo) · `DOMAIN` (colega) · `SHARED` (quem pegar
+primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
+
+---
+
+## Fase 0 — Fundação
+
+| Item | Dono | Status |
+|---|---|---|
+| Estrutura do repositório + `.gitignore` | BOTH | done |
+| `Makefile` (NAME/all/clean/fclean/re/test, sem relink) | BOTH | done |
+| Headers de contrato compilando | BOTH | done |
+| `main.cpp` — validação de argumentos | BOTH | done |
+| Harness de teste (`tests/test_main.cpp`) | BOTH | done |
+| `README.md` / `ARCHITECTURE.md` / `PLANO.md` / `TASKS.md` | BOTH | done |
+| Seção "Testing" no `README.md` (os dois binários, matriz de argumentos) | BOTH | done |
+| Os dois leram o `ARCHITECTURE.md` e aceitaram o seam | BOTH | todo |
+
+---
+
+## Fase 1 — Lógica pura (sem sockets)
+
+| Item | Dono | Status |
+|---|---|---|
+| `utils::toIrcLower` / `equalsIgnoreCase` | SHARED | todo |
+| `utils::split` | SHARED | todo |
+| `utils::toString` / `parseInt` | SHARED | todo |
+| `utils::isValidNickname` | SHARED | todo |
+| `utils::isValidChannelName` | SHARED | todo |
+| `parseMessage` — prefixo, comando, params | SHARED | todo |
+| `parseMessage` — regra do trailing (`:`) | SHARED | todo |
+| `Client` — OCF, getters/setters, `prefix()` | TRANSPORT | todo |
+| `Client` — flags de registro (`isRegistered`) | TRANSPORT | todo |
+| `Client::appendToReadBuffer` / `extractCommand` | TRANSPORT | todo |
+| `Client` — buffer de saída (`queueOutput`/`consumeOutput`) | TRANSPORT | todo |
+| `Channel` — OCF, nome, tópico | DOMAIN | todo |
+| `Channel` — membros (`add`/`remove`/`isMember`) | DOMAIN | todo |
+| `Channel` — operadores | DOMAIN | todo |
+| `Channel` — lista de convites | DOMAIN | todo |
+| `Channel` — modos `i` e `t` | DOMAIN | todo |
+| `Channel` — modo `k` (key) | DOMAIN | todo |
+| `Channel` — modo `l` (limit) | DOMAIN | todo |
+| `Channel::modeString` | DOMAIN | todo |
+| `Replies::numeric` / `Replies::fromClient` | SHARED | todo |
+
+---
+
+## Fase 2 — Servidor vivo
+
+| Item | Dono | Status |
+|---|---|---|
+| `socket` / `setsockopt` / `bind` / `listen` | TRANSPORT | todo |
+| `fcntl(fd, F_SETFL, O_NONBLOCK)` em todo fd | TRANSPORT | todo |
+| **Laço de `poll()` (sessão conjunta)** | BOTH | todo |
+| `accept` de novo cliente + entrada no `_pollFds` | TRANSPORT | todo |
+| `recv` → `appendToReadBuffer` → drenar linhas | TRANSPORT | todo |
+| `send` não bloqueante com `POLLOUT` | TRANSPORT | todo |
+| Desconexão limpa (`disconnectClient`) | TRANSPORT | todo |
+| `buildCommandTable` + despacho | TRANSPORT | todo |
+| Porta do registro no despacho (`451`) | TRANSPORT | todo |
+| `signal` para `SIGINT` (shutdown sem vazar) | TRANSPORT | todo |
+| `cmdPass` (+ `462`, `464`) | TRANSPORT | todo |
+| `cmdNick` (+ `431`, `432`, `433`) | TRANSPORT | todo |
+| `cmdUser` (+ `461`, `462`) | TRANSPORT | todo |
+| Rajada de boas-vindas `001`–`004` | TRANSPORT | todo |
+| `cmdPing` / `cmdPong` | TRANSPORT | todo |
+| `cmdQuit` | TRANSPORT | todo |
+| `CAP` não derruba o servidor | TRANSPORT | todo |
+
+---
+
+## Fase 3 — Comandos contra o irssi
+
+| Item | Dono | Status |
+|---|---|---|
+| `cmdJoin` — canal novo, criador vira operador | DOMAIN | todo |
+| `cmdJoin` — sequência `JOIN`/`332`/`353`/`366` | DOMAIN | todo |
+| `cmdJoin` — múltiplos canais (`#a,#b key1,key2`) | DOMAIN | todo |
+| `cmdJoin` — checagem de `+i`, `+k`, `+l` (`473`/`475`/`471`) | DOMAIN | todo |
+| `cmdPart` (+ `442`, canal vazio é removido) | DOMAIN | todo |
+| `cmdPrivmsg` — para canal | DOMAIN | todo |
+| `cmdPrivmsg` — para usuário (+ `401`, `411`, `412`) | DOMAIN | todo |
+| `cmdTopic` — ver e alterar (+ `331`, `332`, `+t` → `482`) | DOMAIN | todo |
+| `cmdKick` (+ `441`, `442`, `482`) | DOMAIN | todo |
+| `cmdInvite` (+ `341`, `401`, `443`, `482`) | DOMAIN | todo |
+| `cmdMode` — parser de flags (`+it`, `-ik`, params) | DOMAIN | todo |
+| `cmdMode` — `i` | DOMAIN | todo |
+| `cmdMode` — `t` | DOMAIN | todo |
+| `cmdMode` — `k` | DOMAIN | todo |
+| `cmdMode` — `o` | DOMAIN | todo |
+| `cmdMode` — `l` | DOMAIN | todo |
+| `cmdMode` — consulta (`324`) e flag desconhecida (`472`) | DOMAIN | todo |
+| Confirmar `341` e `366` contra o irssi e anotar no `ARCHITECTURE.md` | BOTH | todo |
+
+---
+
+## Fase 4 — Endurecimento
+
+| Item | Dono | Status |
+|---|---|---|
+| Pacote parcial via `nc -C` (teste do subject) | BOTH | todo |
+| Vários comandos num pacote só | BOTH | todo |
+| Linha maior que 512 bytes não derruba | BOTH | todo |
+| Cliente morto (`kill -9`) sem `QUIT` | BOTH | todo |
+| Muitos clientes simultâneos | BOTH | todo |
+| `valgrind` sem vazamento | BOTH | todo |
+| Nenhum retorno de syscall ignorado | BOTH | todo |
+| Ensaio: Eduardo explica a trilha DOMAIN | TRANSPORT | todo |
+| Ensaio: colega explica a trilha TRANSPORT | DOMAIN | todo |
+
+---
+
+## Bloqueios e dúvidas em aberto
+
+Anote aqui o que está travando, para o outro ver sem precisar perguntar.
+
+| O quê | Quem | Desde |
+|---|---|---|
+| — | — | — |
