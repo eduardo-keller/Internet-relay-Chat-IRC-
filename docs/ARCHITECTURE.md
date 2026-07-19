@@ -40,6 +40,11 @@ the seam, don't smuggle the fd through.
 | Line endings | Every message the server sends ends with `\r\n`. |
 | CRLF ownership | `Server::sendToClient` appends `\r\n` **itself**. Never include it in a string you pass to it. |
 | Crashes | The server must never crash or exit unexpectedly. Every `recv`/`send`/`accept` return value is checked. No unchecked `.at()`, no dereferenced `NULL`, no `std::vector` invalidated mid-iteration. |
+| SIGPIPE | `signal(SIGPIPE, SIG_IGN)` at startup, before anything else. Writing to a socket whose peer already closed raises SIGPIPE, and its default action **terminates the process** — an instant grade 0, triggered by something as ordinary as a client being `kill -9`'d mid-broadcast. `signal` is in the subject's allowed-function list. |
+| `EAGAIN` | On a non-blocking fd, `recv`/`send` returning -1 with `errno == EAGAIN` (or `EWOULDBLOCK`) means "nothing right now" — **not** an error and **not** a disconnect. Treating it as failure is the classic non-blocking bug. |
+| `EINTR` | `poll`/`recv`/`send` returning -1 with `errno == EINTR` means a signal interrupted the call. Retry; do not abort and do not disconnect. |
+| `revents` | Check `POLLHUP`, `POLLERR` and `POLLNVAL` on every fd, not just `POLLIN`/`POLLOUT`. Ignoring them spins the loop on a dead fd. `POLLNVAL` means our own fd bookkeeping is wrong — drop the entry rather than crash. |
+| Limits | Every buffer has a bound, from `include/Limits.hpp`. See section 11. |
 | Naming | Code, identifiers, comments and commit messages in **English**. Coordination docs (`PLANO.md`, `TASKS.md`) in Portuguese. |
 
 ---
@@ -55,6 +60,7 @@ the seam, don't smuggle the fd through.
 | Channel | `Channel.hpp` | domain | Members, operators, invites, modes i/t/k/l. |
 | Commands | `Command.hpp` | split | `cmdPass/Nick/User/Quit/Ping/Pong` = transport. `cmdJoin/Part/Privmsg/Kick/Invite/Topic/Mode` = domain. |
 | Replies | `Replies.hpp` | shared | Numeric codes and the two builders. Nobody invents a format. |
+| Limits | `Limits.hpp` | shared | Protocol and buffer bounds. No magic numbers at call sites. |
 
 **The poll loop itself is built jointly in one session** — see `PLANO.md`,
 Phase 2. It is the most novel and most-probed piece; both of us need to be able
@@ -70,12 +76,20 @@ negotiated.
 ### Ownership of memory
 
 `Server` owns every `Client` and every `Channel` (it `new`s and `delete`s them).
-`Channel` stores **non-owning** `Client*`. A client must therefore be removed
-from every channel *before* it is deleted — that is what
-`Server::disconnectClient` is for. After you call `disconnectClient`, the
-`Client&` you were holding is dangling: return from the handler immediately.
+`Channel` stores **non-owning** `Client*` in its member, operator and invite
+sets. A client must therefore be removed from every channel *before* it is
+deleted, and `Server::reapDisconnected` is the only place that deletion ever
+happens.
 
-The invite list stores **nicknames**, not pointers, so it can never dangle.
+The invite list stores `Client*` too, **not nicknames**. Nicknames would lose
+the invite the moment the invitee runs `/nick`: invite `alice`, she becomes
+`bob`, her `JOIN` looks up `bob` and finds nothing. Pointer identity survives a
+nick change for free. The price is that the disconnect sweep must visit *all*
+channels, including ones the client was invited to but never joined.
+
+`Client::getFd()` is **private, with `Server` as the only friend**. That turns
+"logic never touches file descriptors" from a convention into a compile error:
+a handler physically cannot reach the fd.
 
 ---
 
@@ -91,10 +105,42 @@ void     removeChannel(const std::string &name);
 void     sendToClient(Client &client, const std::string &line);
 void     broadcastToChannel(Channel &channel, const std::string &line,
                             const Client *except);
+void     broadcastToPeers(const Client &origin, const std::string &line,
+                          bool includeOrigin);
 void     disconnectClient(Client &client, const std::string &reason);
 const std::string &getPassword() const;
 const std::string &getServerName() const;
 ```
+
+`broadcastToPeers` exists because `NICK` and `QUIT` must reach everyone who
+shares *any* channel with the origin, **each of them exactly once**. Looping
+`broadcastToChannel` over the origin's channels delivers duplicates to anyone
+present in two of them, so the recipient set has to be collected and
+deduplicated first. `includeOrigin` is true for `NICK` (irssi wants its own
+change echoed back) and false for `QUIT`.
+
+### Disconnection is deferred, never immediate
+
+`disconnectClient` **marks** a client; it does not delete it. The poll loop
+reaps every marked client at the end of the iteration: one best-effort `send()`
+to flush what is queued, removal from all channels and invite lists, `close`,
+`delete`.
+
+Deleting inside the handler would be a use-after-free, and the way to trigger
+it is mundane. One TCP packet can carry:
+
+```
+QUIT :bye\r\nPRIVMSG #chan :hello\r\n
+```
+
+The dispatch loop extracts `QUIT`, runs `cmdQuit`, and if that deleted the
+`Client` the loop would then process `PRIVMSG` through a dangling reference.
+Deferring also means queued output can still be flushed, which is impossible
+once the fd is closed.
+
+So: the `Client&` **remains valid** after `disconnectClient` returns. The
+handler should return promptly, and **the dispatch loop must stop extracting
+lines from a client once `isDisconnecting()` is true.**
 
 That is the whole surface. Every method on it is a coupling point between the
 two of us — adding one is a conversation, not a commit.
@@ -122,7 +168,8 @@ The dispatcher, not the handler, enforces registration: if
 [ ':' prefix SPACE ] command *( SPACE middle ) [ SPACE ':' trailing ]
 ```
 
-- Max 512 bytes **including** `\r\n`.
+- Max 512 bytes **including** `\r\n`, so 510 for the payload (RFC 2812 §2.3).
+  This is enforced in both directions — see section 11.
 - The **trailing** parameter begins at the first `" :"` and runs to end of
   line, spaces included. It is the last element of `params`, with the `:`
   stripped. `hasTrailing` is kept because `":"` alone is a legal empty
@@ -291,8 +338,8 @@ error". These are what that costs in practice.
 | `o` | nickname | Grant/revoke operator. Target must be a member → 441. |
 | `l` | limit (on set) | User limit. Channel full → 471. |
 
-- Only channel operators may run `MODE`, `KICK`, `INVITE`, and `TOPIC` when
-  `+t` → otherwise 482.
+- Only channel operators may run `MODE`, `KICK`, `INVITE`.
+- Changing TOPIC requires an operator only under +t. Querying the topic does not.
 - The first user to `JOIN` a new channel becomes its operator.
 - A mode string may carry several flags (`+it`, `-ik`). Parameters are consumed
   left to right, only by the flags that take one. Unknown flag → 472.
@@ -338,3 +385,77 @@ Be actively skeptical on exactly two things:
 2. **C++98.** Models drift into C++11 constantly — `auto`, `nullptr`,
    `to_string`, range-for, brace init. The compiler catches it; read the
    suggestion before you accept it.
+
+---
+
+## 11. Limits and resource bounds
+
+These are **not** Phase 4 polish. Two of them are protocol invariants and the
+rest are the never-crash rule — the subject requires the server not to crash
+"even when it runs out of memory", and an unbounded buffer is a memory
+exhaustion bug reachable by one client that looks perfectly well behaved.
+They also belong to the *design* of the units they live in: adding a cap later
+changes a unit's contract and invalidates its Phase 1 tests.
+
+Constants live in `include/Limits.hpp`.
+
+| Constant | Value | Enforced in |
+|---|---|---|
+| `MAX_MESSAGE_LEN` | 512, CRLF included | protocol invariant, RFC 2812 §2.3 |
+| `MAX_PAYLOAD_LEN` | 510 | `Server::sendToClient`, `Client::extractCommand` |
+| `MAX_READ_BUFFER` | 4096 | `Client::appendToReadBuffer` |
+| `MAX_OUTPUT_QUEUE` | 65536 | `Client::queueOutput` |
+| `RECV_CHUNK` | 4096 | the poll loop |
+
+### Policies
+
+**Incoming line longer than 510.** Truncate to 510 and process it. This is what
+real servers do, and it keeps a fat line from becoming a disconnect.
+
+**Read buffer over 4096 with no complete line in it.** That is one unterminated
+flood, not legitimate pipelining — the qualifier matters, because several
+pipelined commands can legitimately make the buffer large. Send
+`ERROR :Request too long` and disconnect. `appendToReadBuffer` returns `false`
+to signal this; **check the return value.**
+
+**Output queue over 65536.** The client has stopped reading while traffic keeps
+arriving (suspended with Ctrl+Z, or hostile). Other servers call this SendQ
+exceeded. Disconnect. `queueOutput` returns `false` to signal it.
+
+**Outgoing line longer than 510.** Truncate in `sendToClient`, before the CRLF
+is appended.
+
+> This last one is the subtle one, and checking only the incoming length does
+> not catch it. A client sends `PRIVMSG #chan :<504 bytes>` — legal, under 512.
+> The server relays it as `:nick!user@host PRIVMSG #chan :<504 bytes>` and the
+> prefix pushes the result past 512. What makes this cheap to fix is that
+> `sendToClient` is the single choke point every outbound byte passes through,
+> so one truncation there covers every command.
+
+**NUL and stray control bytes.** `std::string` stores NUL fine, but any code
+path that reaches for `.c_str()` will silently truncate at it. Strip NUL, bare
+`\r` and bare `\n` when extracting a line. irssi will never send one; `nc` and
+an evaluator piping binary will.
+
+### One syscall per readiness event
+
+`poll()` is **level-triggered**: if data remains in the kernel buffer after one
+`recv()`, the next `poll()` reports the fd readable again immediately. Nothing
+is lost and nothing stalls.
+
+So do **not** loop `recv()` until `EAGAIN`. That pattern is mandatory for
+edge-triggered `epoll` (`EPOLLET`), which only notifies on transitions, and it
+is merely a throughput optimisation here. For this project it is actively worse:
+the subject says reading any fd "without using `poll()`" is a grade 0, and a
+loop issuing five `recv()`s off one readiness event is defensible but invites a
+question you then have to talk your way out of. One `recv()` per readiness
+event is trivially defensible, and it is fairer — draining lets one flooding
+client monopolise the loop.
+
+`send()` does not want a drain loop either: one `send()` reports how many bytes
+the kernel accepted, and `POLLOUT` stays armed while output remains queued.
+Arm `POLLOUT` **only** when there is something to write, or `poll()` returns
+immediately every iteration and the loop spins at 100% CPU.
+
+Still handle `EAGAIN` gracefully wherever it can appear — level-triggered does
+not make it impossible.

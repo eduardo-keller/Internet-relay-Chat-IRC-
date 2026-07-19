@@ -44,16 +44,46 @@ class Server
 		// CONVENTION: `line` is passed WITHOUT its line ending. sendToClient
 		// appends "\r\n" itself. Never put CRLF in a string you pass here or
 		// you will send a blank line and confuse irssi.
+		//
+		// This is the single choke point for every byte the server emits, so
+		// it is also where the 512-byte limit is enforced: `line` is
+		// truncated to irc::MAX_PAYLOAD_LEN before the CRLF is appended.
+		// That matters because a PRIVMSG that was legal on the way IN can
+		// exceed 512 on the way OUT once ":nick!user@host " is prepended.
 		void	sendToClient(Client &client, const std::string &line);
+
 		// Sends to every member of `channel`. When `except` is non-NULL that
 		// client is skipped — used for PRIVMSG, where the sender must not
 		// receive their own message back.
 		void	broadcastToChannel(Channel &channel, const std::string &line,
 					const Client *except);
 
-		// Queues the quit notice, closes the fd, removes the client from
-		// every channel, and deletes it. The Client& is INVALID on return, so
-		// a handler must return immediately after calling this.
+		// Sends to every client sharing at least one channel with `origin`,
+		// each recipient exactly ONCE however many channels they share.
+		// NICK and QUIT need this; looping broadcastToChannel over the
+		// origin's channels would deliver duplicates to anyone in two of
+		// them. `includeOrigin` is true for NICK (irssi wants its own change
+		// echoed back) and false for QUIT.
+		void	broadcastToPeers(const Client &origin, const std::string &line,
+					bool includeOrigin);
+
+		// Marks the client for disconnection; it is NOT deleted here.
+		//
+		// The client is flagged, the QUIT is broadcast to its peers, and
+		// "ERROR :<reason>" is queued. The poll loop then reaps every marked
+		// client at the END of the iteration: one best-effort send() to flush
+		// what is queued, remove from all channels and invite lists, close,
+		// delete.
+		//
+		// Deleting immediately would be a use-after-free. One TCP packet can
+		// carry "QUIT\r\nPRIVMSG #c :hi\r\n"; the dispatch loop is still
+		// holding this Client& and still has lines to process. Deferring the
+		// delete also means queued output can actually be flushed, which is
+		// impossible once the fd is closed.
+		//
+		// The Client& REMAINS VALID on return. The handler should return
+		// promptly, and the dispatch loop must stop feeding this client
+		// further lines once isDisconnecting() is true.
 		void	disconnectClient(Client &client, const std::string &reason);
 
 		const std::string	&getPassword() const;
@@ -71,6 +101,10 @@ class Server
 		void	handleReadable(int fd);
 		void	handleWritable(int fd);
 		void	handleLine(Client &client, const std::string &line);
+		// Runs once at the end of every poll iteration, after all events are
+		// handled: flushes, closes and deletes every client marked by
+		// disconnectClient. The only place a Client is ever deleted.
+		void	reapDisconnected();
 
 		int								_port;
 		std::string						_password;

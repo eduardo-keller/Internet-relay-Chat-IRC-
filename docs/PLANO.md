@@ -121,6 +121,28 @@ check(c.extractCommand(out) && out == "command", "remontou o comando");
 Testar também: duas linhas num único append viram dois comandos; `\n` sozinho
 (o `nc` manda assim) funciona igual a `\r\n`.
 
+**E os limites, que fazem parte do desenho da unidade, não do polimento:**
+
+```cpp
+// linha maior que 510 bytes é truncada, não derruba
+c.appendToReadBuffer(std::string(600, 'a') + "\r\n");
+check(c.extractCommand(out) && out.size() == irc::MAX_PAYLOAD_LEN,
+      "linha longa truncada em 510");
+
+// enchente sem CRLF é recusada em vez de crescer sem limite
+Client d(4, "localhost");
+check(!d.appendToReadBuffer(std::string(5000, 'x')),
+      "buffer estoura e retorna false");
+
+// fila de saída tem teto (SendQ)
+check(!e.queueOutput(std::string(70000, 'y')), "output queue estoura");
+```
+
+Esses três testes não são detalhe: um buffer sem teto é exaustão de memória
+provocada por um cliente que parece bem-comportado, e o subject exige que o
+servidor não quebre "even when it runs out of memory". Detalhes na seção 11 do
+`ARCHITECTURE.md`.
+
 ---
 
 ### Fase 2 — Servidor vivo (laço de `poll()` juntos, resto do Eduardo)
@@ -128,6 +150,26 @@ Testar também: duas linhas num único append viram dois comandos; `\n` sozinho
 O laço de `poll()` numa sessão conjunta. Depois: `accept`, `recv` para o buffer
 do cliente certo, drenar linhas completas, despachar pelo `CommandTable`,
 `send` não bloqueante com `POLLOUT`, desconexão limpa.
+
+**Invariantes do laço — entram junto com ele, não depois:**
+
+- `signal(SIGPIPE, SIG_IGN)` **antes de qualquer coisa**. Escrever num socket
+  cujo peer já fechou levanta SIGPIPE, e a ação padrão **mata o processo**.
+  É nota 0 na hora, disparado por algo banal como um cliente levar `kill -9`
+  no meio de um broadcast. Uma linha.
+- `EAGAIN`/`EWOULDBLOCK` **não** é erro e **não** é desconexão — é "nada agora".
+  Tratar como falha é o bug clássico de I/O não bloqueante.
+- `EINTR` significa que um sinal interrompeu a chamada: repete, não aborta.
+- Checar `POLLHUP`, `POLLERR` e `POLLNVAL`, não só `POLLIN`/`POLLOUT`.
+- Armar `POLLOUT` **só** quando há saída pendente, senão o `poll()` volta na
+  hora toda iteração e o laço gira a 100% de CPU.
+- Uma syscall por evento de prontidão. `poll()` é *level-triggered*: se sobrou
+  dado no kernel, o próximo `poll()` avisa de novo. Não faça laço até `EAGAIN`
+  — isso é obrigatório em `epoll` edge-triggered, aqui só complica a defesa na
+  avaliação.
+- Desconexão é **adiada**: `disconnectClient` marca, e o reap acontece no fim
+  da iteração. Deletar dentro do handler é use-after-free quando um pacote traz
+  `QUIT` seguido de mais linhas.
 
 **Pronto quando** o servidor aceita várias conexões ao mesmo tempo sem travar,
 e o teste do subject passa de verdade:
@@ -184,11 +226,18 @@ grudados num pacote só, e espera `PONG` nos `PING` dele.
 
 ### Fase 4 — Endurecimento e ensaio da avaliação (juntos)
 
+Aqui é **regressão**, não primeira implementação: os limites e o tratamento de
+erro entraram nas fases 1 e 2. O que se faz agora é tentar quebrar tudo.
+
 - Pacotes parciais e pacotes colados, de novo, com carga.
 - Casos de borda: canal vazio some, `KICK` no último operador, `MODE +k` sem
   parâmetro, `PRIVMSG` para nick inexistente, cliente que some sem `QUIT`.
+- `QUIT` colado com outra linha no mesmo pacote (o caso de use-after-free).
+- `PRIVMSG` de 504 bytes: com o prefixo `:nick!user@host ` a linha de saída
+  passa de 512 e tem que sair truncada em 510, não inteira.
 - Regra do "nunca quebra": `Ctrl+C` no cliente, `kill -9` no cliente, mandar
-  512+ bytes numa linha, mandar lixo binário, conectar e fechar na hora.
+  512+ bytes numa linha, mandar bytes NUL e lixo binário, conectar e fechar na
+  hora, cliente que para de ler (`Ctrl+Z` no `nc`) enquanto o canal conversa.
 - `valgrind --leak-check=full ./ircserv 6667 secret` sem vazamento.
 - **Ensaio da avaliação:** cada um explica a metade do outro em voz alta. Se
   travar em alguma parte, essa parte volta para a lista.

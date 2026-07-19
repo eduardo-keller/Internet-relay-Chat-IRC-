@@ -14,8 +14,15 @@ class Client;
 // OWNERSHIP: members and operators are non-owning Client* pointers into
 // Server's client map. Channel never deletes a Client.
 //
-// The invite list holds NICKNAMES, not pointers, so an invite survives a
-// nick change being processed out of order and never dangles.
+// The invite list holds Client*, NOT nicknames. Storing nicknames would mean
+// an invite is silently lost the moment the invitee runs /nick: invite
+// "alice", she becomes "bob", her JOIN looks up "bob" and finds nothing.
+// Pointer identity survives a nick change for free.
+//
+// The cost is that invites must be cleared when a client disconnects.
+// Server::reapDisconnected already sweeps every channel to drop the client
+// from member and operator sets, so it clears the invite list in the same
+// pass — including channels the client was invited to but never joined.
 //
 // The DOMAIN track owns the internals; only this shape is shared.
 class Channel
@@ -45,9 +52,10 @@ class Channel
 		bool	isOperator(const Client *client) const;
 
 		// --- invite list (mode +i) ----------------------------------------
-		void	addInvite(const std::string &nickname);
-		void	removeInvite(const std::string &nickname);
-		bool	isInvited(const std::string &nickname) const;
+		// Consumed on JOIN: a successful invited join removes the invite.
+		void	addInvite(Client *client);
+		void	removeInvite(Client *client);
+		bool	isInvited(const Client *client) const;
 
 		// --- modes i / t / k / l ------------------------------------------
 		bool	isInviteOnly() const;
@@ -74,7 +82,7 @@ class Channel
 		std::string				_topic;
 		std::set<Client *>		_members;
 		std::set<Client *>		_operators;
-		std::set<std::string>	_invited;
+		std::set<Client *>		_invited;
 		bool					_inviteOnly;
 		bool					_topicRestricted;
 		bool					_hasKey;

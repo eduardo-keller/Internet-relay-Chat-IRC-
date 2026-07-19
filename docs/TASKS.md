@@ -25,6 +25,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | Harness de teste (`tests/test_main.cpp`) | BOTH | done |
 | `README.md` / `ARCHITECTURE.md` / `PLANO.md` / `TASKS.md` | BOTH | done |
 | Seção "Testing" no `README.md` (os dois binários, matriz de argumentos) | BOTH | done |
+| `Limits.hpp` + seção 11 do `ARCHITECTURE.md` (limites e bounds) | BOTH | done |
 | Os dois leram o `ARCHITECTURE.md` e aceitaram o seam | BOTH | todo |
 
 ---
@@ -43,11 +44,16 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `Client` — OCF, getters/setters, `prefix()` | TRANSPORT | todo |
 | `Client` — flags de registro (`isRegistered`) | TRANSPORT | todo |
 | `Client::appendToReadBuffer` / `extractCommand` | TRANSPORT | todo |
+| `Client` — teto do buffer de leitura (`MAX_READ_BUFFER`, retorna `false`) | TRANSPORT | todo |
+| `Client` — truncar linha em `MAX_PAYLOAD_LEN` (510) | TRANSPORT | todo |
+| `Client` — descartar NUL e `\r`/`\n` soltos | TRANSPORT | todo |
 | `Client` — buffer de saída (`queueOutput`/`consumeOutput`) | TRANSPORT | todo |
+| `Client` — teto da fila de saída (`MAX_OUTPUT_QUEUE`, SendQ) | TRANSPORT | todo |
+| `Client` — `isDisconnecting` / `markDisconnecting` | TRANSPORT | todo |
 | `Channel` — OCF, nome, tópico | DOMAIN | todo |
 | `Channel` — membros (`add`/`remove`/`isMember`) | DOMAIN | todo |
 | `Channel` — operadores | DOMAIN | todo |
-| `Channel` — lista de convites | DOMAIN | todo |
+| `Channel` — lista de convites (guarda `Client*`, não nick) | DOMAIN | todo |
 | `Channel` — modos `i` e `t` | DOMAIN | todo |
 | `Channel` — modo `k` (key) | DOMAIN | todo |
 | `Channel` — modo `l` (limit) | DOMAIN | todo |
@@ -65,11 +71,18 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | **Laço de `poll()` (sessão conjunta)** | BOTH | todo |
 | `accept` de novo cliente + entrada no `_pollFds` | TRANSPORT | todo |
 | `recv` → `appendToReadBuffer` → drenar linhas | TRANSPORT | todo |
-| `send` não bloqueante com `POLLOUT` | TRANSPORT | todo |
-| Desconexão limpa (`disconnectClient`) | TRANSPORT | todo |
+| `send` não bloqueante com `POLLOUT` (armado só se há saída) | TRANSPORT | todo |
+| `sendToClient` trunca em 510 antes do CRLF | TRANSPORT | todo |
+| `broadcastToPeers` — destinatários únicos (NICK/QUIT) | TRANSPORT | todo |
+| `disconnectClient` marca; `reapDisconnected` deleta no fim | TRANSPORT | todo |
+| Despacho para de extrair linhas se `isDisconnecting()` | TRANSPORT | todo |
 | `buildCommandTable` + despacho | TRANSPORT | todo |
 | Porta do registro no despacho (`451`) | TRANSPORT | todo |
+| **`signal(SIGPIPE, SIG_IGN)`** — sem isso o processo morre | TRANSPORT | todo |
 | `signal` para `SIGINT` (shutdown sem vazar) | TRANSPORT | todo |
+| `EAGAIN`/`EWOULDBLOCK` não é erro nem desconexão | TRANSPORT | todo |
+| `EINTR` repete a chamada | TRANSPORT | todo |
+| `POLLHUP` / `POLLERR` / `POLLNVAL` tratados | TRANSPORT | todo |
 | `cmdPass` (+ `462`, `464`) | TRANSPORT | todo |
 | `cmdNick` (+ `431`, `432`, `433`) | TRANSPORT | todo |
 | `cmdUser` (+ `461`, `462`) | TRANSPORT | todo |
@@ -111,7 +124,11 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 |---|---|---|
 | Pacote parcial via `nc -C` (teste do subject) | BOTH | todo |
 | Vários comandos num pacote só | BOTH | todo |
-| Linha maior que 512 bytes não derruba | BOTH | todo |
+| Regressão: linha > 512 truncada (implementado na Fase 1) | BOTH | todo |
+| `PRIVMSG` de 504 bytes + prefixo sai truncado em 510 | BOTH | todo |
+| `QUIT` colado com outra linha no mesmo pacote | BOTH | todo |
+| Cliente que para de ler (`Ctrl+Z` no `nc`) estoura SendQ | BOTH | todo |
+| Bytes NUL e lixo binário não derrubam | BOTH | todo |
 | Cliente morto (`kill -9`) sem `QUIT` | BOTH | todo |
 | Muitos clientes simultâneos | BOTH | todo |
 | `valgrind` sem vazamento | BOTH | todo |

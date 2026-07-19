@@ -5,6 +5,7 @@
 #include "Channel.hpp"
 #include "Client.hpp"
 #include "Command.hpp"
+#include "Limits.hpp"
 #include "Message.hpp"
 #include "Replies.hpp"
 #include "Server.hpp"
