@@ -41,15 +41,15 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `utils::isValidChannelName` | SHARED | todo |
 | `parseMessage` — prefixo, comando, params | SHARED | todo |
 | `parseMessage` — regra do trailing (`:`) | SHARED | todo |
-| `Client` — OCF, getters/setters, `prefix()` | TRANSPORT | todo |
-| `Client` — flags de registro (`isRegistered`) | TRANSPORT | todo |
-| `Client::appendToReadBuffer` / `extractCommand` | TRANSPORT | todo |
-| `Client` — teto do buffer de leitura (`MAX_READ_BUFFER`, retorna `false`) | TRANSPORT | todo |
-| `Client` — truncar linha em `MAX_PAYLOAD_LEN` (510) | TRANSPORT | todo |
-| `Client` — descartar NUL e `\r`/`\n` soltos | TRANSPORT | todo |
+| `Client` — OCF, getters/setters, `prefix()` | TRANSPORT | done |
+| `Client` — flags de registro (`isRegistered`) | TRANSPORT | done |
+| `Client::appendToReadBuffer` / `extractCommand` | TRANSPORT | done |
+| `Client` — teto do buffer de leitura (`MAX_READ_BUFFER`, retorna `false`) | TRANSPORT | done |
+| `Client` — truncar linha em `MAX_PAYLOAD_LEN` (510) | TRANSPORT | done |
+| `Client` — descartar NUL e `\r`/`\n` soltos | TRANSPORT | done |
 | `Client` — buffer de saída (`queueOutput`/`consumeOutput`) | TRANSPORT | todo |
 | `Client` — teto da fila de saída (`MAX_OUTPUT_QUEUE`, SendQ) | TRANSPORT | todo |
-| `Client` — `isDisconnecting` / `markDisconnecting` | TRANSPORT | todo |
+| `Client` — `isDisconnecting` / `markDisconnecting` | TRANSPORT | done |
 | `Channel` — OCF, nome, tópico | DOMAIN | todo |
 | `Channel` — membros (`add`/`remove`/`isMember`) | DOMAIN | todo |
 | `Channel` — operadores | DOMAIN | todo |

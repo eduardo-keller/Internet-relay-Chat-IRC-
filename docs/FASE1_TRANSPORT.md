@@ -11,22 +11,23 @@ substituto dela. Onde os dois discordarem, a `PLANO.md` vence.
 
 ## Progresso
 
-**Estamos no passo 3**, com o código e os testes escritos e o `make test` ainda
-por rodar.
+**Estamos no passo 10.** Os passos 0–9 estão verdes: `make test` dá
+`62 passed, 0 failed`, sem warning, e `make && make` continua dizendo
+"Nothing to be done".
 
 | Passo | O quê | Status |
 |---|---|---|
 | 0 | Linha de base (`make re && make test` verde) | ✅ feito |
 | 1 | `src/Client.cpp` nasce: OCF completa | ✅ feito — 5 asserções |
 | 2 | Identidade e `prefix()` | ✅ feito — 11 asserções acumuladas |
-| **3** | **Flags de registro e `isRegistered()` derivado** | 🔵 **código e testes escritos, falta rodar `make test`** |
-| 4 | Desconexão diferida | ⬜ |
-| 5 | `appendToReadBuffer`, sem teto ainda | ⬜ |
-| 6 | `extractCommand`: caso feliz, `\r\n` e `\n` sozinho | ⬜ |
-| 7 | Truncar a linha em `MAX_PAYLOAD_LEN` (510) | ⬜ |
-| 8 | Sanitizar: NUL, `\r` solto, `\n` solto | ⬜ |
-| 9 | Teto do buffer de leitura → `false` | ⬜ |
-| 10 | Buffer de saída | ⬜ |
+| 3 | Flags de registro e `isRegistered()` derivado | ✅ feito — 19 asserções acumuladas |
+| 4 | Desconexão diferida | ✅ feito — 23 asserções acumuladas |
+| 5 | `appendToReadBuffer`, sem teto ainda | ✅ feito |
+| 6 | `extractCommand`: caso feliz, `\r\n` e `\n` sozinho | ✅ feito — 39 asserções acumuladas |
+| 7 | Truncar a linha em `MAX_PAYLOAD_LEN` (510) | ✅ feito — 45 asserções acumuladas |
+| 8 | Sanitizar: NUL, `\r` solto, `\n` solto | ✅ feito — 56 asserções acumuladas |
+| 9 | Teto do buffer de leitura → `false` | ✅ feito — 62 asserções acumuladas |
+| **10** | **Buffer de saída** | ⬜ **próximo** |
 | 11 | Teto da fila de saída (SendQ) → `false` | ⬜ |
 | 12 | Fechar a Parte A (TASKS.md + PR) | ⬜ |
 | 13 | `utils::toIrcLower` / `equalsIgnoreCase` | ⬜ |
@@ -213,7 +214,7 @@ canal inteiro, bug que só aparece depois de alguém rodar `/nick`; o formato
 
 **Resultado:** 11 asserções acumuladas.
 
-### 🔵 Passo 3 — flags de registro e `isRegistered()` derivado
+### ✅ Passo 3 — flags de registro e `isRegistered()` derivado
 
 **Funções:** `hasPass`/`hasNick`/`hasUser`, os 3 setters, `isRegistered()`,
 `welcomeSent()`/`setWelcomeSent()`.
@@ -230,10 +231,13 @@ ordem real não é garantida (o irssi manda `PASS`/`NICK`/`USER` num pacote só)
 porque `NICK` volta a acontecer depois do registro; quem lê `isRegistered()` na
 fase 2 é **o dispatcher**, não cada handler — é ele que responde `451`.
 
-**Estado:** código e testes escritos (8 asserções novas, 19 acumuladas), falta
-rodar `make test`.
+**Resultado:** 19 asserções acumuladas (8 novas). As três que carregam o passo
+são a que limpa uma flag já registrada (prova que `isRegistered()` é derivado, e
+não um `bool` guardado que ficaria para trás), a que ativa as flags fora de
+ordem (`USER`, `NICK`, `PASS` — é assim que o irssi manda, num pacote só) e a
+que separa `welcomeSent` de `isRegistered()`.
 
-### ⬜ Passo 4 — desconexão diferida
+### ✅ Passo 4 — desconexão diferida
 
 **Funções:** `isDisconnecting()`, `markDisconnecting()`, `getQuitReason()`.
 
@@ -242,14 +246,21 @@ rodar `make test`.
 deletasse o `Client`, o laço de despacho processaria o `PRIVMSG` seguinte por uma
 referência pendurada; por isso `Server::disconnectClient` **marca** e
 `reapDisconnected` deleta no fim da iteração; quem lê a flag na fase 2 (o laço
-de despacho para de extrair linhas; o reap decide quem morre); **decisão a
-tomar: primeira razão vence** (uma segunda marcação não sobrescreve), para o
+de despacho para de extrair linhas; o reap decide quem morre); **decisão
+tomada: primeira razão vence** (uma segunda marcação não sobrescreve), para o
 `ERROR :<reason>` refletir a causa real e não a última.
 
 **Teste:** cliente novo não está desconectando; após marcar, flag + razão; marcar
 duas vezes não troca a razão.
 
-### ⬜ Passo 5 — `appendToReadBuffer`, sem teto ainda
+**Resultado:** 23 asserções acumuladas (4 novas). Uma correção ao cenário acima,
+notada ao escrever o passo: o pacote com `QUIT` + `PRIVMSG` **não** é o que torna
+o bug alcançável. O laço de despacho é `while (client.extractCommand(line))`, e a
+condição é avaliada de novo assim que o handler retorna — um `QUIT` sozinho já
+basta para chamar `extractCommand` em memória liberada. O pacote colado só
+aumenta o estrago (aí o `PRIVMSG` inteiro roda por uma referência pendurada).
+
+### ✅ Passo 5 — `appendToReadBuffer`, sem teto ainda
 
 **Conceitos:** TCP é um **fluxo de bytes sem fronteiras de mensagem** — o kernel
 não tem noção de "comando IRC", e `recv()` devolve uma contagem de bytes, não uma
@@ -263,7 +274,16 @@ efeito não é observável sozinho — a prova real chega no passo 6, que é o p
 dele. Vale como passo separado porque o conceito (fluxo de bytes) é a ideia
 central da trilha.
 
-### ⬜ Passo 6 — `extractCommand`: o caso feliz, `\r\n` e `\n` sozinho
+**Resultado:** feito junto com o passo 6. O valor do passo não está nas duas
+linhas de código e sim no **contrato do chamador**, que ficou registrado em
+comentário: na fase 2 o `handleReadable` tem que construir a string com a
+CONTAGEM que o `recv` devolveu (`std::string(buf, n)`), nunca
+`std::string(buf)` — `buf` não é terminado em NUL, então a forma de um argumento
+lê além dos dados e ainda trunca em qualquer NUL que o cliente mandou. E checar
+`n` antes de converter: `n == 0` é o peer fechando a conexão, e
+`std::string(buf, -1)` pede uma string de ~18 quintilhões de bytes.
+
+### ✅ Passo 6 — `extractCommand`: o caso feliz, `\r\n` e `\n` sozinho
 
 **Conceitos:** `find('\n')` e `std::string::npos`; `substr` + `erase`; **por que
 procuramos `\n` e depois removemos um `\r` final, em vez de procurar `"\r\n"`
@@ -278,7 +298,16 @@ dar `false`, **e para antes disso se `isDisconnecting()` virar true**).
 funciona igual a `\r\n`; buffer vazio → `false`; `"\r\n"` sozinho extrai uma
 linha vazia (e o dispatcher tem que ignorar linha vazia sem responder nada).
 
-### ⬜ Passo 7 — truncar a linha em `MAX_PAYLOAD_LEN` (510)
+**Resultado:** 39 asserções acumuladas (16 novas, contando o passo 5). Duas
+armadilhas ficaram registradas em comentário. O `+ 1` no `erase` é o próprio
+terminador, e esquecê-lo devolve uma linha vazia extra antes de **cada** linha
+real — como o dispatcher ignora linha vazia, o servidor continua *parecendo*
+funcionar, que é o pior tipo de bug. E procurar `"\r\n"` em vez de `'\n'` não só
+deixa de responder ao `nc` (que sem `-C` manda LF puro) como faz os bytes não
+terminados se acumularem até o teto do passo 9 desconectar um cliente
+perfeitamente bem-comportado.
+
+### ✅ Passo 7 — truncar a linha em `MAX_PAYLOAD_LEN` (510)
 
 **Conceitos:** RFC 2812 §2.3 — 512 bytes **incluindo** o CRLF, logo 510 de
 payload; a **política é truncar e processar**, não desconectar, porque é o que
@@ -290,7 +319,24 @@ de ganhar o prefixo `:nick!user@host `.
 **Teste:** 600 `'a'` + CRLF → `out.size() == irc::MAX_PAYLOAD_LEN`; exatamente
 510 passa intacto; 511 → 510.
 
-### ⬜ Passo 8 — sanitizar: NUL, `\r` solto, `\n` solto
+**Resultado:** 45 asserções acumuladas (6 novas). Entrou uma que não estava na
+lista acima e é justamente a que pega implementação errada: depois de truncar uma
+linha de 600 bytes, o **buffer tem que ficar vazio**. Uma versão que truncasse
+deixando a sobra no buffer devolveria um segundo comando montado com os 90 bytes
+descartados. Aqui isso sai de graça porque o `erase(0, end + 1)` já tirou a linha
+inteira antes de o `resize` rodar.
+
+A ordem dentro do `extractCommand` ficou fixada: framing (`substr`/`erase`) →
+terminador (`\r`) → teto de 510 → sanitização (passo 8). O `\r` sai **antes** do
+teto porque a RFC conta o CRLF dentro dos 512, então os 510 valem para o que
+sobra depois do terminador.
+
+E o lembrete de que este passo é só **metade do par**: um `PRIVMSG` de 504 bytes
+é legal na entrada e só estoura os 512 depois de ganhar o prefixo
+`:nick!user@host ` na saída. Quem corta isso é o `sendToClient` na fase 2 — item
+já listado no `TASKS.md`, e o único ponto por onde todo byte de saída passa.
+
+### ✅ Passo 8 — sanitizar: NUL, `\r` solto, `\n` solto
 
 **Conceitos:** `std::string` guarda NUL sem reclamar, mas **qualquer caminho que
 chame `.c_str()` trunca silenciosamente ali** — um NUL é uma mina no parser;
@@ -303,7 +349,30 @@ binário).
 **Teste:** `"PING\0 :x"` sai sem o NUL; `\r` no meio da linha desaparece; lixo
 binário não quebra nada.
 
-### ⬜ Passo 9 — teto do buffer de leitura → `false`
+**Resultado:** 56 asserções acumuladas (11 novas). Três coisas ficaram
+decididas e registradas em comentário.
+
+**Só esses três bytes, não todos os de controle.** "Limpar tudo abaixo de 0x20"
+parece o lado seguro e é errado: `0x01` delimita CTCP, que é como o irssi manda
+`/me` (`PRIVMSG #chan :\x01ACTION waves\x01`), e `0x02`/`0x03`/`0x0F`/`0x1F` são
+negrito, cor, reset e sublinhado. Não implementamos CTCP — só repassamos os
+bytes — então `/me` funciona de graça a menos que a gente estrague. Limpar amplo
+faria o `/me` aparecer como o texto literal `ACTION waves` entre dois irssi de
+verdade na fase 3. Isto bate com o que a `ARCHITECTURE.md` §11 já dizia, então
+não é mudança de contrato.
+
+**O `\n` do predicado é defensivo, não um caso vivo.** A linha foi cortada no
+primeiro `\n`, logo nenhum pode estar dentro dela: injeção de CRLF já é
+impossível pelo *framing*, não pela limpeza. Fica só como proteção caso o
+framing mude.
+
+**Limpar depois de truncar** (a decisão que o passo 7 antecipou): limpar antes
+deixaria o cliente usar NUL de enchimento para passar payload além dos 510 — 600
+bytes com 100 NUL entregariam 500 bytes reais pelo mesmo custo na rede. Ancorar
+o teto nos bytes **da rede** é o que mantém o teto real. Preço aceito e testado:
+uma linha de 510 com 3 NUL é entregue com 507.
+
+### ✅ Passo 9 — teto do buffer de leitura → `false`
 
 **Conceitos:** exaustão de memória provocada por um cliente que parece educado;
 **o qualificador é o ponto todo** — estourar 4096 **sem nenhuma linha completa
@@ -317,6 +386,30 @@ justamente o pedaço que completava a linha); quem age no `false` na fase 2
 **Teste:** 5000 `'x'` sem CRLF → `false`; **5000 bytes com um CRLF dentro →
 `true`** (é este teste que prova que você acertou o qualificador, e é o que
 quase toda implementação erra).
+
+**Resultado:** 62 asserções acumuladas (6 novas). O qualificador virou uma
+condição composta só:
+
+```cpp
+if (_readBuffer.size() > irc::MAX_READ_BUFFER
+	&& _readBuffer.find('\n') == std::string::npos)
+	return (false);
+```
+
+O `find('\n')` é de propósito o **mesmo critério** com que o `extractCommand`
+corta linha. Qualquer teste diferente aqui acabaria recusando um buffer que o
+`extractCommand` teria drenado numa boa.
+
+Duas asserções entraram fora da lista acima: o teto tem que ser **ultrapassado**,
+não apenas alcançado (4096 exatos sem terminador ainda passam; 4097 não), e o
+teto vale para o buffer **acumulado**, não para um chunk — um cliente pingando
+1000 bytes sem terminador cai igual a quem despeja tudo de uma vez.
+
+E o "anexar primeiro, checar depois": recusar antes poderia jogar fora justamente
+o pedaço que fechava a linha (buffer em 4090 recebendo os últimos 10 bytes mais o
+CRLF é legítimo). O custo é um transitório **limitado** — o `recv` pede no máximo
+`RECV_CHUNK`, então o pico antes da resposta é
+`MAX_READ_BUFFER + RECV_CHUNK` = 8192, explicável em vez de ilimitado.
 
 ### ⬜ Passo 10 — buffer de saída
 
