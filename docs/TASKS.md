@@ -34,21 +34,21 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 
 | Item | Dono | Status |
 |---|---|---|
-| `utils::toIrcLower` / `equalsIgnoreCase` | SHARED | todo |
-| `utils::split` | SHARED | todo |
-| `utils::toString` / `parseInt` | SHARED | todo |
-| `utils::isValidNickname` | SHARED | todo |
-| `utils::isValidChannelName` | SHARED | todo |
-| `parseMessage` — prefixo, comando, params | SHARED | todo |
-| `parseMessage` — regra do trailing (`:`) | SHARED | todo |
+| `utils::toIrcLower` / `equalsIgnoreCase` | SHARED (Eduardo) | done |
+| `utils::split` | SHARED (Eduardo) | done |
+| `utils::toString` / `parseInt` | SHARED (Eduardo) | done |
+| `utils::isValidNickname` | SHARED (Eduardo) | done |
+| `utils::isValidChannelName` | SHARED (Eduardo) | done |
+| `parseMessage` — prefixo, comando, params | SHARED (Eduardo) | todo |
+| `parseMessage` — regra do trailing (`:`) | SHARED (Eduardo) | todo |
 | `Client` — OCF, getters/setters, `prefix()` | TRANSPORT | done |
 | `Client` — flags de registro (`isRegistered`) | TRANSPORT | done |
 | `Client::appendToReadBuffer` / `extractCommand` | TRANSPORT | done |
 | `Client` — teto do buffer de leitura (`MAX_READ_BUFFER`, retorna `false`) | TRANSPORT | done |
 | `Client` — truncar linha em `MAX_PAYLOAD_LEN` (510) | TRANSPORT | done |
 | `Client` — descartar NUL e `\r`/`\n` soltos | TRANSPORT | done |
-| `Client` — buffer de saída (`queueOutput`/`consumeOutput`) | TRANSPORT | todo |
-| `Client` — teto da fila de saída (`MAX_OUTPUT_QUEUE`, SendQ) | TRANSPORT | todo |
+| `Client` — buffer de saída (`queueOutput`/`consumeOutput`) | TRANSPORT | done |
+| `Client` — teto da fila de saída (`MAX_OUTPUT_QUEUE`, SendQ) | TRANSPORT | done |
 | `Client` — `isDisconnecting` / `markDisconnecting` | TRANSPORT | done |
 | `Channel` — OCF, nome, tópico | DOMAIN | todo |
 | `Channel` — membros (`add`/`remove`/`isMember`) | DOMAIN | todo |
@@ -58,7 +58,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `Channel` — modo `k` (key) | DOMAIN | todo |
 | `Channel` — modo `l` (limit) | DOMAIN | todo |
 | `Channel::modeString` | DOMAIN | todo |
-| `Replies::numeric` / `Replies::fromClient` | SHARED | todo |
+| `Replies::numeric` / `Replies::fromClient` | SHARED (Eduardo) | todo |
 
 ---
 

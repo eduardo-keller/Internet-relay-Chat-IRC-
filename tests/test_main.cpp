@@ -49,6 +49,7 @@ int	main(void)
 	std::cout << "running unit tests" << std::endl;
 
 	runClientTests();
+	runUtilsTests();
 
 	std::cout << std::endl
 		<< g_passed << " passed, " << g_failed << " failed" << std::endl;

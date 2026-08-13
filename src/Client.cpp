@@ -374,6 +374,101 @@ bool	Client::extractCommand(std::string &out)
 	return (true);
 }
 
+// --- write side -----------------------------------------------------------
+//
+// A non-blocking send() reports a byte COUNT, not success or failure. It may
+// accept 200 bytes of a 500-byte line and leave the rest, and that remainder
+// has nowhere to go except a buffer we own — per client, for the same reason
+// the read buffer is per client: poll() multiplexes, and every connection has
+// its own unfinished business.
+//
+// This side is deliberately ignorant of the protocol. It queues bytes, nothing
+// more. The CRLF and the 510-byte truncation both belong to
+// Server::sendToClient (docs/ARCHITECTURE.md sections 2 and 11), the single
+// chokepoint every outbound byte passes through. Appending the CRLF here as
+// well would put a blank line after every message.
+
+// Returns FALSE when this message would push the queue past MAX_OUTPUT_QUEUE —
+// what other servers call "SendQ exceeded". The client has stopped reading:
+// Ctrl+Z on nc, a laptop lid closing, or plain hostility.
+//
+// Note the asymmetry with the read side. A flooder there pays for its own flood
+// by having to transmit the bytes; here the stalled client turns OTHER PEOPLE'S
+// traffic into our memory, since every PRIVMSG to a busy channel queues another
+// line for it. Not reading costs the attacker nothing, which makes this the
+// more dangerous of the two caps.
+//
+// CHECK FIRST, APPEND AFTER — the opposite of appendToReadBuffer, for a reason
+// rather than by taste. There, the arriving chunk might COMPLETE a line, so
+// refusing before looking could throw away the very bytes that made the buffer
+// legal. Here nothing is salvageable: the client is not reading, it is about to
+// be reaped, and these bytes will never leave the machine. With no payoff there
+// is no reason to accept a transient, so 65536 is a HARD cap — never exceeded,
+// not even briefly. Refusing without appending also leaves the queue intact and
+// still drainable, which is what the reap's best-effort flush needs.
+//
+// The test is on the SUM, not on the current size. Checking _outputBuffer.size()
+// alone looks equivalent and is not: a queue sitting at 65535 would accept a
+// message of any length and land wherever that message put it, making the cap
+// soft again — exceedable by up to one whole message. No overflow risk in the
+// addition, since data is a single line of at most 512 bytes once sendToClient
+// has truncated it.
+//
+// There is no qualifier here, unlike the read cap. A large read buffer is
+// ambiguous — unterminated flood, or legitimate pipelining? — which is exactly
+// what that find('\n') test resolves. A large output queue is not ambiguous: no
+// client that is reading normally accumulates 64 KB of undelivered data, so the
+// size IS the symptom and there is nothing to disambiguate.
+//
+// Phase 2 acts on the false: sendToClient calls disconnectClient. See
+// docs/ARCHITECTURE.md section 4 for why disconnectClient must return early when
+// the client is already marked — it queues ERROR :<reason>, which lands right
+// back here and would recurse.
+bool	Client::queueOutput(const std::string &data)
+{
+	if (_outputBuffer.size() + data.size() > irc::MAX_OUTPUT_QUEUE)
+		return (false);
+	_outputBuffer += data;
+	return (true);
+}
+
+// A const reference, so the poll loop hands .c_str() and .size() straight to
+// send() with no copy. Const also because consumption must go through
+// consumeOutput: this class owns the invariant that what the kernel accepted is
+// exactly what gets dropped, and a caller editing the buffer directly could
+// desync the two.
+const std::string	&Client::getOutputBuffer() const
+{
+	return (_outputBuffer);
+}
+
+// Drops the bytes send() actually accepted.
+//
+// The clamp is belt-and-braces: std::string::erase already removes only
+// min(n, size() - pos), so erase(0, 999999) on a short buffer is well defined
+// and simply clears it. It stays because the bound is then visible in the code
+// rather than resting on a corner of the standard the reader has to recall, and
+// because it would become load-bearing the moment this stopped being a
+// std::string.
+void	Client::consumeOutput(std::size_t bytes)
+{
+	if (bytes > _outputBuffer.size())
+		bytes = _outputBuffer.size();
+	_outputBuffer.erase(0, bytes);
+}
+
+// The poll loop arms POLLOUT ONLY while this is true.
+//
+// That is not an optimisation. A socket with room in its send buffer is almost
+// always writable, so a permanently armed POLLOUT makes poll() return
+// immediately every iteration and the loop spins at 100% CPU with nothing to
+// do. It is visible in top and it is one of the first things an evaluator
+// notices. See docs/ARCHITECTURE.md section 11.
+bool	Client::hasPendingOutput() const
+{
+	return (!_outputBuffer.empty());
+}
+
 // --- deferred disconnect --------------------------------------------------
 //
 // Dropping a client happens in two steps: this marks it, and the poll loop's

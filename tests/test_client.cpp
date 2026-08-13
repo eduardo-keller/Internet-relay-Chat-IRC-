@@ -342,6 +342,89 @@ static void	testReadBufferCap(void)
 		"read cap: an unterminated drip accumulates until it trips the cap");
 }
 
+// The output side exists because a non-blocking send() reports a byte count,
+// not success: it can accept part of a line and leave the rest, and the rest
+// has to wait somewhere per client until the socket is writable again.
+static void	testOutputBuffer(void)
+{
+	Client	client(3, "localhost");
+
+	check(!client.hasPendingOutput(),
+		"output: a fresh client has nothing queued");
+
+	check(client.queueOutput("PING :token\r\n"),
+		"output: queueing accepts the data");
+	check(client.hasPendingOutput(),
+		"output: queued data counts as pending");
+	checkEqual(client.getOutputBuffer(), "PING :token\r\n",
+		"output: the queue holds exactly what was put in");
+
+	// The partial-write case: send() took 5 bytes, so only 5 come off.
+	client.consumeOutput(5);
+	checkEqual(client.getOutputBuffer(), ":token\r\n",
+		"output: a partial send consumes only what actually went out");
+	check(client.hasPendingOutput(),
+		"output: the remainder stays pending");
+
+	// Queueing appends rather than replaces — a broadcast queues a line to
+	// every member at once, so several can sit waiting behind each other.
+	client.queueOutput("PONG :token\r\n");
+	checkEqual(client.getOutputBuffer(), ":token\r\nPONG :token\r\n",
+		"output: a second queue lands behind the first");
+
+	client.consumeOutput(client.getOutputBuffer().size());
+	check(!client.hasPendingOutput(),
+		"output: consuming everything clears the pending flag");
+	check(client.getOutputBuffer().empty(),
+		"output: and the buffer really is empty");
+
+	// hasPendingOutput() decides whether POLLOUT is armed, so an over-large
+	// consume must not corrupt it. std::string::erase already clamps; the
+	// explicit clamp in consumeOutput only makes that visible.
+	client.queueOutput("x");
+	client.consumeOutput(999999);
+	check(!client.hasPendingOutput(),
+		"output: consuming more than is queued does not break anything");
+}
+
+// "SendQ exceeded": the client stopped reading while the channel kept talking.
+// Unlike the read cap this one is HARD — checked before appending, so the queue
+// never exceeds 65536 even transiently.
+static void	testOutputQueueCap(void)
+{
+	const std::size_t	half = 40000;
+	Client				stalled(3, "localhost");
+
+	check(!stalled.queueOutput(std::string(70000, 'y')),
+		"send queue: a message past the cap is refused");
+	// Refused WITHOUT appending is the whole point: that is what makes 65536
+	// a hard limit instead of one exceedable by a single message.
+	check(!stalled.hasPendingOutput(),
+		"send queue: a refused message is not queued at all");
+
+	// Two writes that each fit but together do not: the cap is on the queue,
+	// not on one message.
+	Client	filling(4, "localhost");
+
+	check(filling.queueOutput(std::string(half, 'a')),
+		"send queue: the first 40000 bytes fit");
+	check(!filling.queueOutput(std::string(half, 'b')),
+		"send queue: the second 40000 would overflow, so it is refused");
+	check(filling.getOutputBuffer().size() == half,
+		"send queue: the refusal leaves what was already queued intact");
+
+	// Exceeded, not merely reached — the same boundary rule as the read cap.
+	Client	atLimit(5, "localhost");
+
+	check(atLimit.queueOutput(std::string(irc::MAX_OUTPUT_QUEUE, 'z')),
+		"send queue: exactly 65536 is accepted");
+
+	Client	overLimit(6, "localhost");
+
+	check(!overLimit.queueOutput(std::string(irc::MAX_OUTPUT_QUEUE + 1, 'z')),
+		"send queue: one byte over the cap is refused");
+}
+
 static void	testDeferredDisconnect(void)
 {
 	Client	client(3, "localhost");
@@ -366,6 +449,52 @@ static void	testDeferredDisconnect(void)
 		"disconnect: a second mark does not overwrite the first reason");
 }
 
+// The official Phase 1 criterion, transcribed from PLANO.md section 3 and
+// repeated in FASE1_TRANSPORT.md's "Verificação". Kept as a permanent test so
+// the criterion can never silently drift away from the implementation.
+//
+// Not redundant with the tests above, and the difference is structural: this
+// block reuses the SAME Client c across reassembly and truncation, where the
+// tests above build a fresh client per concern. So it is the one that proves
+// composition — that once "command" has been extracted, the buffer is clean
+// enough for the next scenario to start from zero.
+//
+// Variable names are c/d/e and the flow is verbatim from the doc, on purpose:
+// the value of this test is that it matches the criterion as written. Assertion
+// names are in English per ARCHITECTURE.md section 2 and map one-to-one onto
+// the Portuguese labels in PLANO.md.
+static void	testPlanoCriterion(void)
+{
+	Client		c(3, "localhost");
+	std::string	out;
+
+	c.appendToReadBuffer("com");
+	check(!c.extractCommand(out),
+		"PLANO: an incomplete fragment does not become a command");
+	c.appendToReadBuffer("man");
+	check(!c.extractCommand(out),
+		"PLANO: still incomplete");
+	c.appendToReadBuffer("d\r\n");
+	check(c.extractCommand(out) && out == "command",
+		"PLANO: the command was reassembled");
+
+	// Same client deliberately: this only starts from zero if the extraction
+	// above really drained the buffer.
+	c.appendToReadBuffer(std::string(600, 'a') + "\r\n");
+	check(c.extractCommand(out) && out.size() == irc::MAX_PAYLOAD_LEN,
+		"PLANO: a long line is truncated at 510");
+
+	Client	d(4, "localhost");
+
+	check(!d.appendToReadBuffer(std::string(5000, 'x')),
+		"PLANO: the read buffer overflows and returns false");
+
+	Client	e(5, "localhost");
+
+	check(!e.queueOutput(std::string(70000, 'y')),
+		"PLANO: the output queue overflows");
+}
+
 void	runClientTests(void)
 {
 	testOrthodoxCanonicalForm();
@@ -376,5 +505,8 @@ void	runClientTests(void)
 	testLineTruncation();
 	testSanitising();
 	testReadBufferCap();
+	testOutputBuffer();
+	testOutputQueueCap();
 	testDeferredDisconnect();
+	testPlanoCriterion();
 }

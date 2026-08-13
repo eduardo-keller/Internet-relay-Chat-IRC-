@@ -17,5 +17,6 @@ void	checkEqual(const std::string &actual, const std::string &expected,
 
 // --- per-unit entry points; add one line when you add a test file ---------
 void	runClientTests(void);
+void	runUtilsTests(void);
 
 #endif

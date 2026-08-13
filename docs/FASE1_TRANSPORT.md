@@ -11,9 +11,15 @@ substituto dela. Onde os dois discordarem, a `PLANO.md` vence.
 
 ## Progresso
 
-**Estamos no passo 10.** Os passos 0–9 estão verdes: `make test` dá
-`62 passed, 0 failed`, sem warning, e `make && make` continua dizendo
-"Nothing to be done".
+**Estamos no passo 16.** Os passos 0–11 e 13–15 estão verdes: `make test` dá
+`132 passed, 0 failed`, sem warning, e `make && make` continua dizendo
+"Nothing to be done". O passo 12 segue aberto **só no `valgrind`** — o bloco
+"Pronto quando" da `PLANO.md` já está dentro da suíte e passa.
+
+O passo 12 original foi **dividido**: a verificação (bloco "Pronto quando" +
+`valgrind`) fica aqui, agora; o PR virou o passo 19, depois da Parte B. Decisão
+do Eduardo — terminar até o 18 antes de mexer na `main`. Verificar é sobre o
+código estar certo e fica barato hoje; o PR é coordenação e pode esperar.
 
 | Passo | O quê | Status |
 |---|---|---|
@@ -27,26 +33,33 @@ substituto dela. Onde os dois discordarem, a `PLANO.md` vence.
 | 7 | Truncar a linha em `MAX_PAYLOAD_LEN` (510) | ✅ feito — 45 asserções acumuladas |
 | 8 | Sanitizar: NUL, `\r` solto, `\n` solto | ✅ feito — 56 asserções acumuladas |
 | 9 | Teto do buffer de leitura → `false` | ✅ feito — 62 asserções acumuladas |
-| **10** | **Buffer de saída** | ⬜ **próximo** |
-| 11 | Teto da fila de saída (SendQ) → `false` | ⬜ |
-| 12 | Fechar a Parte A (TASKS.md + PR) | ⬜ |
-| 13 | `utils::toIrcLower` / `equalsIgnoreCase` | ⬜ |
-| 14 | `utils::split` / `toString` / `parseInt` | ⬜ |
-| 15 | `utils::isValidNickname` / `isValidChannelName` | ⬜ |
-| 16 | `parseMessage`: prefixo, comando, params | ⬜ |
+| 10 | Buffer de saída | ✅ feito — 72 asserções acumuladas |
+| 11 | Teto da fila de saída (SendQ) → `false` | ✅ feito — 79 asserções acumuladas |
+| **12** | **Verificar a Parte A ("Pronto quando" + `valgrind`)** | 🔵 **bloco automatizado e verde; falta `valgrind`** |
+| 13 | `utils::toIrcLower` / `equalsIgnoreCase` | ✅ feito — 96 asserções acumuladas |
+| 14 | `utils::split` / `toString` / `parseInt` | ✅ feito — 113 asserções acumuladas |
+| 15 | `utils::isValidNickname` / `isValidChannelName` | ✅ feito — 132 asserções acumuladas |
+| **16** | **`parseMessage`: prefixo, comando, params** | ⬜ **próximo** |
 | 17 | `parseMessage`: a regra do trailing | ⬜ |
 | 18 | `Replies::numeric` / `fromClient` | ⬜ |
+| 19 | Fechar a fase 1 (TASKS.md + PR) | ⬜ |
 
 ### Arquivos já criados
 
-- `src/Client.cpp` — OCF, identidade, `prefix()`, flags de registro
+- `src/Client.cpp` — OCF, identidade, `prefix()`, flags de registro, desconexão
+  diferida, buffers de leitura e de saída com os respectivos tetos
+- `src/Utils.cpp` — casemapping, `split`, `toString`/`parseInt`, validação de
+  nickname e de nome de canal
 - `tests/harness.hpp` — declara `check`/`checkEqual` e os pontos de entrada
 - `tests/test_client.cpp` — `runClientTests()`
-- `tests/test_main.cpp` — editado: inclui o harness, chama `runClientTests()`
+- `tests/test_utils.cpp` — `runUtilsTests()`
+- `tests/test_main.cpp` — editado: inclui o harness e chama os dois pontos de
+  entrada
 
-Nem o `Makefile` nem nenhum header de `include/` foi tocado, e não devem ser:
-`src/*.cpp` e `tests/*.cpp` são globbed, e os headers são o contrato com o
-colega.
+O `Makefile` não foi tocado e não deve ser: `src/*.cpp` e `tests/*.cpp` são
+globbed. De `include/`, **só o `Limits.hpp`** foi tocado, no passo 15, para ganhar
+`MAX_NICKNAME_LEN` e `MAX_CHANNEL_LEN` — adição pura, que não quebra nada e vai
+nas notas do PR. Os outros headers seguem intocados: são o contrato com o colega.
 
 ---
 
@@ -411,7 +424,7 @@ CRLF é legítimo). O custo é um transitório **limitado** — o `recv` pede no
 `RECV_CHUNK`, então o pico antes da resposta é
 `MAX_READ_BUFFER + RECV_CHUNK` = 8192, explicável em vez de ilimitado.
 
-### ⬜ Passo 10 — buffer de saída
+### ✅ Passo 10 — buffer de saída
 
 **Funções:** `queueOutput` (sem teto ainda), `getOutputBuffer`, `consumeOutput`,
 `hasPendingOutput`.
@@ -429,7 +442,27 @@ direto para o `send()`); `consumeOutput` tem que **limitar `bytes` a `size()`**
 resto; consumir tudo → vazio e `hasPendingOutput()` false; `consumeOutput(999999)`
 não quebra.
 
-### ⬜ Passo 11 — teto da fila de saída (SendQ) → `false`
+**Resultado:** 72 asserções acumuladas (10 novas).
+
+**Uma correção ao que o passo pedia:** o `consumeOutput` **não precisa** limitar
+`bytes` para não quebrar. O `std::string::erase(0, n)` já remove apenas
+`min(n, size() - pos)`, então `consumeOutput(999999)` num buffer curto é bem
+definido e só esvazia a fila. O clamp explícito ficou assim mesmo — deixa o
+limite visível no código em vez de depender de um canto do padrão que o leitor
+tem que lembrar, e vira load-bearing no dia em que isso deixar de ser
+`std::string`. Mas ele é redundante, e vale saber disso: na avaliação, "o que
+acontece se `bytes > size()`?" tem duas respostas certas aqui.
+
+Entrou uma asserção fora da lista: um segundo `queueOutput` **anexa atrás** do
+primeiro em vez de substituir. É o caso do broadcast, em que várias linhas podem
+estar esperando na fila do mesmo cliente.
+
+E o `hasPendingOutput()` é o que arma o `POLLOUT` na fase 2. Não é otimização: um
+socket com espaço no buffer de envio está quase sempre gravável, então `POLLOUT`
+armado o tempo todo faz o `poll()` voltar na hora toda iteração e o laço gira a
+100% de CPU sem ter o que fazer — visível no `top`.
+
+### ✅ Passo 11 — teto da fila de saída (SendQ) → `false`
 
 **Conceitos:** "SendQ exceeded" — o cliente parou de ler (Ctrl+Z no `nc`, ou
 hostil) enquanto o canal continua conversando; **decisão a tomar: checar antes e
@@ -441,12 +474,56 @@ de 65536 é um limite **duro**; quem age no `false` na fase 2 (`sendToClient` �
 **Teste:** 70000 `'y'` → `false` **e a fila continua vazia**; dois enfileiramentos
 de 40000 → o segundo dá `false`; exatamente no limite → `true`.
 
-### ⬜ Passo 12 — fechar a Parte A
+**Resultado:** 79 asserções acumuladas (7 novas). Com isto os 9 itens
+`TRANSPORT` da fase 1 estão `done` no `TASKS.md` — a Parte A está implementada.
 
-Rodar o bloco "Pronto quando" inteiro da `PLANO.md` §3 Fase 1. Marcar os 9 itens
-`TRANSPORT` como `done` no `TASKS.md` **no mesmo commit**. Branch
-`feat/transport-buffer`, PR (a `PLANO.md` §5 pede PR mesmo sendo dois — é o
-mecanismo de alfabetização).
+Duas coisas para saber defender.
+
+**A comparação é sobre a SOMA**, não sobre o tamanho atual. Checar só
+`_outputBuffer.size() > MAX_OUTPUT_QUEUE` parece equivalente e não é: uma fila em
+65535 aceitaria uma mensagem de qualquer tamanho e pararia onde essa mensagem
+parasse, deixando o teto mole de novo — ultrapassável por uma mensagem inteira.
+É o tipo de erro que passa nos testes quando eles só estouram o teto de uma vez.
+
+**A assimetria com o passo 9 é justificada, não inconsistência.** Lá o chunk que
+chega pode COMPLETAR uma linha, então recusar antes de olhar jogaria fora
+justamente os bytes que tornariam o buffer legal. Aqui não há nada a salvar: o
+cliente não está lendo, vai ser reapado, e esses bytes nunca sairiam da máquina.
+Sem ganho não há razão para aceitar transitório, então 65536 é teto **duro**. Os
+dois retornam `false` com o mesmo significado para quem chama — "desconecte este
+cliente" — que é onde a consistência importa.
+
+Saiu daqui uma armadilha da fase 2 que a `ARCHITECTURE.md` §4 agora documenta: o
+`disconnectClient` enfileira `ERROR :<reason>`, então num cliente com a fila
+cheia esse enfileiramento falha e volta direto para o `disconnectClient` —
+recursão infinita se ele não sair cedo quando o cliente já está marcado.
+
+### ⬜ Passo 12 — verificar a Parte A
+
+Só verificação. O PR foi adiado para o passo 19; os 9 itens `TRANSPORT` já estão
+`done` no `TASKS.md`.
+
+**Rodar o bloco "Pronto quando" da `PLANO.md` §3 Fase 1, verbatim.** Ele não é
+redundante com o `tests/test_client.cpp`, e a diferença é estrutural: o bloco
+reusa o **mesmo `Client c`** na remontagem e na truncagem, enquanto os testes
+daqui constroem um cliente novo por assunto. Ou seja, ele prova a *composição* —
+que depois de extrair `command` o buffer está limpo o bastante para o cenário
+seguinte começar do zero. Os testes daqui afirmam isso em cada caso separado;
+"o critério oficial passa como está escrito" é outra afirmação.
+
+✅ **Feito, e permanente em vez de descartável:** virou `testPlanoCriterion()` em
+`tests/test_client.cpp`, com o fluxo e os nomes de variável (`c`/`d`/`e`)
+verbatim do documento. Passa — 85 asserções no total. Ficando na suíte, o
+critério oficial não consegue divergir da implementação sem quebrar o
+`make test`. Os rótulos das asserções estão em inglês (`ARCHITECTURE.md` §2) e
+mapeiam um-para-um nos rótulos em português da `PLANO.md`.
+
+**`valgrind --leak-check=full ./run_tests`.** O `Client` não tem `new` nem
+ponteiro cru, só `std::string` e PODs, então o esperado é limpo em trinta
+segundos. O valor não é achar algo hoje: é ter uma **linha de base limpa**, para
+que um vazamento que apareça no passo 16 seja obviamente do passo 16. E é barato
+agora porque o `run_tests` linka **um** arquivo de implementação — depois do 18
+são quatro, e o relatório vira um bisect.
 
 ---
 
@@ -456,7 +533,11 @@ Sem dono fixo na `PLANO.md` §2 ("quem estiver travado na própria trilha pega u
 delas"). **Antes de começar: avisar o colega, ou os dois escrevem o mesmo
 arquivo.** Marcar o nome nos itens `SHARED` do `TASKS.md`.
 
-### ⬜ Passo 13 — `src/Utils.cpp`: `toIrcLower` / `equalsIgnoreCase`
+Isso ficou **mais** urgente com o PR adiado para o passo 19: marcar o nome no
+`TASKS.md` de uma branch que não subiu não avisa ninguém. O aviso tem que sair
+por fora — empurrar a branch, ou falar com ele.
+
+### ✅ Passo 13 — `src/Utils.cpp`: `toIrcLower` / `equalsIgnoreCase`
 
 **Conceitos:** casemapping da RFC 2812 §2.2 — `{}|^` são as minúsculas de
 `[]\~`, herança do IRC ter nascido escandinavo; `std::tolower` puro está
@@ -467,7 +548,35 @@ considera iguais e o `433` nunca dispara; `std::tolower` recebe `int` e dá UB c
 
 **Teste:** o exemplo do `README.md`: `toIrcLower("Nick[42]") == "nick{42}"`.
 
-### ⬜ Passo 14 — `utils::split` / `toString` / `parseInt`
+**Resultado:** 96 asserções acumuladas (11 novas). Duas decisões.
+
+**O `std::tolower` não é usado — o problema foi removido, não tratado.** O
+conceito acima manda converter para `unsigned char` antes; em vez disso a função
+é escrita à mão em ASCII puro, o que dispensa a conversão. Dois motivos: ele não
+sabe nada dos pares de colchete, então os `if` existiriam de qualquer jeito e ele
+só cobriria o `A`–`Z`; e ele consulta o **locale global**, onde `tolower('I')`
+nem sempre é `'i'` (o caso turco é o clássico). O casemapping do IRC é definido
+só sobre ASCII, então locale nenhum tem o que responder aqui.
+
+A aritmética virou uma faixa só: `A`–`Z` é `0x41`–`0x5A`, `[ \ ]` vêm logo
+depois em `0x5B`–`0x5D`, e o caso em ASCII é um bit (`0x20`) — que é exatamente
+*por que* o mapeamento escandinavo funciona. `~` → `^` é a exceção, porque desce
+em vez de subir.
+
+**A direção do par `~`/`^` seguiu o contrato**, não a lógica histórica. A
+`Utils.hpp` §11 e a `ARCHITECTURE.md` §5 dizem as duas que `^` é a minúscula de
+`~`; os servidores reais fazem o contrário (`0x5E` era Ü e `0x7E` era ü, então
+`^`→`~` mantém o `+0x20` dos outros três pares). **As duas leituras dão a mesma
+resposta ao `equalsIgnoreCase`** — `nick^` e `nick~` são o mesmo nick de qualquer
+forma, só muda qual vira o representante canônico. Como não há diferença
+funcional, ganhou a leitura que não obriga a editar um header, que é conversa com
+o colega e não commit. Custo: um `if` a mais.
+
+Estrutura: os testes foram para `tests/test_utils.cpp` com `runUtilsTests()`, não
+dentro do `test_client.cpp` — a `harness.hpp` pede um arquivo por unidade
+justamente para as duas trilhas nunca editarem o mesmo arquivo de teste.
+
+### ✅ Passo 14 — `utils::split` / `toString` / `parseInt`
 
 **Conceitos:** `split` **preserva campos vazios** de propósito
 (`JOIN #a,,#b` não pode virar silenciosamente dois canais); `std::ostringstream`
@@ -475,10 +584,35 @@ porque C++98 não tem `std::to_string`; `parseInt` devolve `bool` + parâmetro d
 saída porque tem que **recusar** não-dígito e overflow (quem usa: `MODE +l`).
 
 **Teste:** `split("#a,,#b", ',')` → 3 campos; `toString(-42)`; `parseInt("12x")`
-→ false. **Decisão a tomar:** o que `split("", ',')` devolve (0 campos ou 1
-vazio) — escolher e anotar.
+→ false. **Decisão tomada:** `split("", ',')` devolve **1 campo vazio** — ver
+abaixo.
 
-### ⬜ Passo 15 — `utils::isValidNickname` / `isValidChannelName`
+**Resultado:** 113 asserções acumuladas (17 novas).
+
+**A decisão: `split("", ',')` → 1 campo vazio, não 0 campos.** Duas razões. A
+invariante fica dizível numa linha — o resultado sempre tem
+**(delimitadores + 1) campos** — e escolher 0 para a string vazia seria uma
+exceção aberta numa função que fora isso é uniforme (`"a,"` já dá
+`["a", ""]`). E o que decide de vez é o comportamento a jusante: `JOIN :` chega
+no `split("")`; com 1 campo vazio ele desce para o `isValidChannelName`, falha,
+e o cliente recebe um `403` de verdade. Com 0 campos o corpo do laço não roda e
+um comando que o cliente realmente mandou é respondido com **silêncio**.
+
+**Por que campos vazios são preservados**, com um motivo mais forte que o do
+enunciado: o IRC casa listas paralelas por **posição**. `JOIN #a,#b ,key2` é
+legal e clientes reais mandam — `#a` sem chave, `#b` com `key2`. Colapsar o campo
+vazio faz a lista de chaves virar `["key2"]`, que então cai no `#a`: o usuário é
+barrado num canal e entrega a chave em outro.
+
+**No `parseInt`, a checagem de overflow roda ANTES da multiplicação.** Checar
+depois é o erro comum e já é comportamento indefinido — o overflow de inteiro
+com sinal aconteceu antes de haver o que inspecionar. Sinal `+`/`-` é aceito (a
+função responde "isto é um inteiro?"; se um negativo faz *sentido* é pergunta do
+`cmdMode`), e `INT_MIN` é recusado como overflow, porque um acumulador `int` não
+guarda a magnitude dele — recusado explicitamente em vez de embrulhar em
+silêncio.
+
+### ✅ Passo 15 — `utils::isValidNickname` / `isValidChannelName`
 
 **Conceitos:** a gramática de nickname da RFC 2812 §2.3.1 (letra ou especial
 ``[]\`_^{|}`` primeiro, depois letra/dígito/especial/`-`); nome de canal começa
@@ -486,12 +620,38 @@ com `#`, sem espaço, sem vírgula, sem `:`, sem `\a`; o valor de retorno é a
 resposta inteira — sem string de erro, quem chama decide o numeric (`432` ou
 `403`).
 
-**Decisões a tomar e anotar no `ARCHITECTURE.md`:** o limite de 9 caracteres da
-RFC (servidores reais usam 30, o irssi aceita mais) e se aceitamos `&` além de
-`#` como prefixo de canal.
+**Decisões tomadas e anotadas no `ARCHITECTURE.md`** (§5 "Name validation" e a
+tabela da §11): o limite de nickname e o prefixo de canal — detalhes abaixo.
 
 **Teste:** os exemplos do `README.md` — `isValidNickname("alice")` true,
 `isValidNickname("4lice")` false (não pode começar com dígito).
+
+**Resultado:** 132 asserções acumuladas (19 novas).
+
+**Nickname: 30, não os 9 da RFC.** O número da RFC é de 1988; todo servidor real
+subiu, e o irssi preenche o nick a partir do usuário do sistema, então 9
+recusaria logins reais antes de a pessoa digitar qualquer coisa. Algum teto é
+obrigatório de todo jeito: o nick entra no `:nick!user@host` de **toda** mensagem
+que o cliente origina, e esse prefixo é cobrado do `MAX_PAYLOAD_LEN` — é limite
+de recurso disfarçado de validação. Canal fica com os 50 da própria RFC.
+
+**Só `#` como prefixo.** A RFC 2812 lista também `&`, `+` e `!`. O `+` significa
+"não suporta modos", o que contradiz o `MODE` que o subject exige; o `!` precisa
+de IDs de canal gerados; e o `&` significa *server-local* — como o subject
+proíbe ligação servidor-servidor, todo canal aqui **já é** local, então `&` seria
+um segundo prefixo com comportamento idêntico. `&foo` falha na validação e quem
+chama responde `403`.
+
+**Uma observação que fecha o passo 13:** o conjunto `special` da RFC é
+`%x5B-60` e `%x7B-7D` — inclui `^` (0x5E) e **não** inclui `~` (0x7E). Um
+nickname legal nunca contém `~`, então a direção do par `~`/`^` só pode importar
+para nome de canal. Confirma, depois do fato, que aquela decisão era de baixo
+risco.
+
+**As constantes foram para o `Limits.hpp`** — a **primeira edição de header da
+fase 1**. É adição pura e não muda nada existente, e o `MAX_CHANNEL_LEN` é
+justamente o que evita o colega inventar um 50 próprio no modelo de `Channel`.
+Entra nas notas do PR junto com a mudança da `ARCHITECTURE.md` §4.
 
 ### ⬜ Passo 16 — `src/Message.cpp`: `parseMessage` (prefixo, comando, params)
 
@@ -530,6 +690,29 @@ irssi; `target` é o nick do destinatário, ou `*` antes do registro.
 **Teste:** `numeric("irc.local", 1, "*", ":Welcome")` começa com
 `":irc.local 001 * "`; conferir o padding em 1, 2, 3, 4 e que 421 sai sem
 padding; `fromClient("a!b@c", "JOIN", "#x")` → `":a!b@c JOIN #x"`.
+
+### ⬜ Passo 19 — fechar a fase 1 (TASKS.md + PR)
+
+Era a segunda metade do passo 12; foi adiado para cá de propósito.
+
+Marcar os itens `SHARED` como `done` no `TASKS.md` **no mesmo commit**. Branch
+`feat/transport-buffer`, PR (a `PLANO.md` §5 pede PR mesmo sendo dois — é o
+mecanismo de alfabetização).
+
+**No corpo do PR, avisar que a `ARCHITECTURE.md` §4 mudou:** o
+`disconnectClient` tem que retornar imediatamente quando o cliente já está
+marcado. É esclarecimento, não renegociação do seam — nada mudou de forma — mas é
+uma regra que os handlers do colega conseguem disparar (todo comando dele chama
+`sendToClient`), então vai no corpo do PR e não escondida no diff.
+
+**O custo de adiar até aqui, para entrar de olhos abertos.** O `TASKS.md` é o
+cérebro compartilhado (`PLANO.md` §4), mas ele só sincroniza quando sobe.
+Enquanto a `transpor_fase_1` não for empurrada, a sessão do colega vê os 9 itens
+`TRANSPORT` como `todo` e não vê **nenhuma reivindicação nos itens `SHARED`** que
+a Parte B vai mexer. Substituto: empurrar a branch mesmo sem abrir o PR, ou
+avisar o colega direto. E um PR com `Client` + `Utils` + `Message` + `Replies`
+junto é uma revisão bem mais difícil que quatro pequenos — a alfabetização
+enfraquece conforme o diff cresce.
 
 ---
 

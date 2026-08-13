@@ -34,6 +34,18 @@ namespace irc
 
 	// How much we ask recv() for per readiness event.
 	const std::size_t	RECV_CHUNK = 4096;
+
+	// Name bounds. RFC 2812 section 2.3.1 allows only 9 characters for a
+	// nickname, but that is a 1988 figure: every deployed server raised it,
+	// and irssi fills the nickname from the system username, so a 9-character
+	// cap turns away real users before they have typed anything. 30 is the
+	// common modern value. Some bound is mandatory either way — the nickname
+	// goes into ":nick!user@host" on every message the client originates, and
+	// that prefix is charged against MAX_PAYLOAD_LEN.
+	//
+	// The channel limit is the RFC's own 50, unchanged.
+	const std::size_t	MAX_NICKNAME_LEN = 30;
+	const std::size_t	MAX_CHANNEL_LEN = 50;
 }
 
 #endif
