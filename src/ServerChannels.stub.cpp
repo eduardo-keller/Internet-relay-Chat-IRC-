@@ -3,9 +3,9 @@
 #include "Channel.hpp"
 #include "Server.hpp"
 
-// TEMPORARY — delete this file when src/Channel.cpp lands.
-// See docs/FASE2.md sections 3.2 and 9 (step 9 replaces it with the real
-// src/ServerChannels.cpp in the same commit that removes this one).
+// TEMPORARY — deleted in step 4.5, which replaces it with the real
+// src/ServerChannels.cpp in the same commit. See docs/FASE2.md sections 3.2
+// and "Passo 4.5".
 //
 // WHY IT EXISTS. The Makefile globs src/*.cpp and links every object into both
 // binaries. A single call to Channel::getMembers() with no Channel.cpp behind

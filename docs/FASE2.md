@@ -20,19 +20,20 @@ para ser defendida linha a linha na avaliação.
 
 | # | Passo | Entrega observável | Status |
 |---|---|---|---|
-| 0 | Decisões e reserva de nomes | `TASKS.md` atualizado, colega avisado | todo |
+| 0 | Decisões e reserva de nomes | `TASKS.md` atualizado, colega avisado | done |
 | 1 | Socket de escuta, sem `poll()` | `ss -ltn` mostra a porta; SIGINT sai limpo | done |
 | 2 | Esqueleto do `poll()` + `accept` + reap | 3 clientes simultâneos, 0% de CPU ocioso | todo |
 | 3 | Caminho de leitura (`recv` → buffer → linhas) | **teste do subject (`com^Dman^Dd`) passa** | todo |
 | 4 | Caminho de escrita (`sendToClient` + `POLLOUT`) | truncagem em 510 e SendQ no `make test` | todo |
+| 4.5 | Gancho de integração: seam de canal real | destrava os handlers do colega | todo |
 | 5 | Despachante (parse, tabela, `421`, `451`) | `FOO` → 421, `JOIN` sem registro → 451 | todo |
 | 6 | `PASS`/`NICK`/`USER` + rajada `001`–`004` | registro ponta a ponta pelo `nc` | todo |
 | 7 | `PING`/`PONG`, `QUIT`, `CAP` | `QUIT` colado com outra linha não quebra | todo |
 | 8 | Endurecimento e fechamento da fase | valgrind limpo, 50 clientes, `TASKS.md` | todo |
-| 9 | Gancho de integração — **depende de `Channel.cpp`** | seam de canal real, tabela completa | todo (bloqueado) |
 
-Os passos 1–8 **não dependem de nada da trilha DOMAIN**. O passo 9 é o único
-que espera o colega. Ver seção 3.
+Os passos 1–4 e 5–8 **não dependem de nada da trilha DOMAIN**. O 4.5 é o único
+que precisa do `Channel.cpp`, e era o passo 9 até 2026-08-15 — foi promovido
+quando o colega publicou o modelo pronto. Ver seção 3.
 
 ---
 
@@ -40,10 +41,11 @@ que espera o colega. Ver seção 3.
 
 Anotadas aqui para não serem redecididas, e para o colega ver sem perguntar.
 
-**Todas aceitas em 2026-08-15** como padrão de trabalho, para a fase não ficar
-parada esperando o colega. Só o **D2** mexe num arquivo que a outra trilha
-também edita (`Command.hpp`); os outros ficam inteiros dentro de código do
-TRANSPORT, então um conflito, se vier, custa uma linha para reverter.
+**Todas aceitas em 2026-08-15**, e **confirmadas pela trilha DOMAIN no mesmo
+dia** — ela também aceitou as reservas de nome de arquivo e a propriedade da
+`buildCommandTable`, e informou que nada disso conflita com o código dela.
+Só o **D2** mexe num arquivo que a outra trilha também edita (`Command.hpp`);
+os outros ficam inteiros dentro de código do TRANSPORT.
 
 | # | Decisão | Valor | Status |
 |---|---|---|---|
@@ -130,13 +132,22 @@ Em ordem de quanto doeriam:
    endereços, não determinística entre execuções. Nenhum teste dos dois lados
    pode depender da ordem dos nicks no `353`.
 
-### 3.4 O que pedir ao colega agora
+### 3.4 O que pedir ao colega — RESOLVIDO em 2026-08-15
 
-O `Channel` da Fase 1 dele (as 4 primeiras linhas do `TASKS.md`: OCF, membros,
-operadores, convites) é o **caminho crítico da integração** — não os handlers.
-Os handlers dele não linkam enquanto não existirem `Channel.cpp` **e** o meu
-`ServerChannels.cpp` de verdade. Pedir que ele suba `Channel.cpp` cedo, mesmo
-com os modos ainda vazios.
+O pedido era: subir `src/Channel.cpp` cedo, mesmo com os modos ainda vazios,
+porque ele é o caminho crítico da integração — não os handlers.
+
+**Entregue, e completo.** `origin/domain`, commit `da0165f`: OCF inteira e as 29
+funções do header, incluindo as sete de que o meu seam precisa (`getName`,
+`getMembers`, `isMember`, `removeMember`, `removeOperator`, `removeInvite`,
+`isEmpty`), mais 574 linhas de teste em `tests/test_channel.cpp`. Nenhuma
+colisão de arquivo: ele não criou `Server.cpp`, `Command.cpp` nem
+`CommandTable.cpp`.
+
+Isso é o que permitiu promover o passo 9 para 4.5. **A dívida agora é minha:**
+enquanto o `ServerChannels.cpp` de verdade não existir, os handlers dele linkam
+contra o stub e dão segfault no primeiro `JOIN`, porque `getOrCreateChannel`
+devolve `NULL` lá.
 
 ---
 
@@ -144,17 +155,18 @@ com os modos ainda vazios.
 
 ### Passo 0 — Decisões e reserva de nomes
 
-**Status:** `todo`
+**Status:** `done` — 2026-08-15
 
 Antes de qualquer código, porque é o que impede as duas sessões de divergirem.
 
 - [x] Confirmar D1–D6 da seção 2 — aceitas em 2026-08-15
-- [ ] Anotar D5 (grafia da chave de canal) no `ARCHITECTURE.md` §5
-- [ ] Avisar o colega do D2 (`cmdCap` novo no `Command.hpp`) — é a única
-      decisão que toca arquivo dele
-- [ ] Registrar em `TASKS.md` (tabela de bloqueios): dono de `buildCommandTable`,
-      nomes de arquivo reservados, e o pedido de `Channel.cpp` cedo
-- [ ] Commit e push, para o colega ver sem precisar perguntar
+- [x] Anotar D5 (grafia da chave de canal) no `ARCHITECTURE.md` §5, na
+      subseção Casemapping
+- [x] Avisar o colega do D2 (`cmdCap` novo no `Command.hpp`) — confirmado por
+      DOMAIN em 2026-08-15
+- [x] Registrar o dono de `buildCommandTable`, os nomes de arquivo reservados e
+      o pedido de `Channel.cpp` cedo — tudo aceito por DOMAIN em 2026-08-15
+- [x] Commit e push, para o colega ver sem precisar perguntar
 
 ---
 
@@ -349,6 +361,48 @@ check(c.isDisconnecting(),
 
 ---
 
+### Passo 4.5 — Gancho de integração: o seam de canal de verdade
+
+**Status:** `todo`
+
+**Estava no fim da fase (era o passo 9) e foi promovido para cá em 2026-08-15**,
+quando o colega publicou `src/Channel.cpp` completo em `origin/domain`
+(`da0165f`). O motivo da antecipação não sou eu — são os passos 5 a 8 que não
+precisam disto. É ele: os handlers dele **linkam** contra o stub, mas
+`getOrCreateChannel` devolve `NULL` lá, então o primeiro `JOIN` que ele testar
+dá segfault. Ele consegue escrever, não consegue testar. Este é o ponto mais
+cedo em que dá para destravá-lo, porque `broadcastToChannel` e
+`broadcastToPeers` são construídos em cima do `sendToClient`, que é do passo 4.
+
+**Primeira ação do passo: trazer o `Channel.cpp` para a árvore**
+(`git merge origin/domain`). Sem ele, o `ServerChannels.cpp` não linka — foi
+exatamente para isso que o stub existiu. Ficou decidido em 2026-08-15 **não**
+mergear antes disso, para a `transport_fase_2` não carregar o trabalho da outra
+trilha durante os passos 2 a 4.
+
+- [ ] `git merge origin/domain` (traz `Channel.cpp` e os testes de canal dele)
+- [ ] `git rm src/ServerChannels.stub.cpp`
+- [ ] `src/ServerChannels.cpp` de verdade: `findChannel`, `getOrCreateChannel`,
+      `removeChannel`, `broadcastToChannel`, `broadcastToPeers`,
+      `sweepChannels`, `clearAllChannels`
+- [ ] chave do mapa `_channels` é `utils::toIrcLower(nome)` (D5)
+- [ ] `disconnectClient` passa a transmitir o `QUIT` aos peers
+- [ ] teste: cliente que sai de canal cheio não deixa ponteiro pendurado
+      (valgrind + dois clientes num canal)
+- [ ] `make test` verde com os testes de `Channel` dele juntos
+
+`cmdNick` transmitindo a troca de nick aos peers (`includeOrigin = true`) e as 7
+entradas de DOMAIN na `CommandTable.cpp` ficam para depois dos passos 6 e 5
+respectivamente, já que dependem de código que ainda não existe nessa altura.
+
+`broadcastToPeers` — o conjunto de destinatários deduplicado — é a peça
+interessante desta fase e é minha: `NICK` e `QUIT` precisam alcançar todo mundo
+que compartilha **algum** canal com a origem, **cada um exatamente uma vez**.
+Repetir `broadcastToChannel` sobre os canais da origem entrega duplicado para
+quem está em dois deles.
+
+---
+
 ### Passo 5 — Despachante: parse, tabela, `421`, `451`
 
 **Status:** `todo`
@@ -474,33 +528,13 @@ printf 'CAP LS 302\r\n' | nc -C -q1 127.0.0.1 6667   # não derruba
 
 ---
 
-### Passo 9 — Gancho de integração (**bloqueado em `src/Channel.cpp`**)
-
-**Status:** `todo` — bloqueado
-
-- [ ] `git rm src/ServerChannels.stub.cpp`
-- [ ] `src/ServerChannels.cpp` de verdade: `findChannel`, `getOrCreateChannel`,
-      `removeChannel`, `broadcastToChannel`, `broadcastToPeers`,
-      `sweepChannels`, `clearAllChannels`
-- [ ] `disconnectClient` passa a transmitir o `QUIT` aos peers
-- [ ] `cmdNick` passa a transmitir a troca de nick aos peers (`includeOrigin = true`)
-- [ ] as 7 entradas de DOMAIN entram no `CommandTable.cpp`
-- [ ] teste: cliente que sai de canal cheio não deixa ponteiro pendurado
-      (valgrind + dois clientes num canal)
-
-`broadcastToPeers` — o conjunto de destinatários deduplicado — é a peça
-interessante e é minha. Dá para escrever e revisar durante o passo 8, desde que
-fique na branch `feat/transport-channel-seam` para a `main` seguir verde.
-
----
-
 ## 5. Arquivos que esta fase cria ou toca
 
 | Arquivo | Ação | Passo |
 |---|---|---|
 | `src/Server.cpp` | novo | 1–4 |
-| `src/ServerChannels.stub.cpp` | novo, **descartável** | 1 (apagado no 9) |
-| `src/ServerChannels.cpp` | novo | 9 |
+| `src/ServerChannels.stub.cpp` | novo, **descartável** | 1 (apagado no 4.5) |
+| `src/ServerChannels.cpp` | novo | 4.5 |
 | `src/CommandTable.cpp` | novo | 5 |
 | `src/CommandsRegistration.cpp` | novo | 6–7 |
 | `src/main.cpp` | edita | 1 |
@@ -518,7 +552,9 @@ fique na branch `feat/transport-channel-seam` para a `main` seguir verde.
 
 Espelhar no `TASKS.md` para o colega ver.
 
-| O quê | Quem destrava | Desde |
-|---|---|---|
-| `src/Channel.cpp` não existe → passo 9 parado, e os handlers do colega não linkam | DOMAIN | — |
-| D1–D6 aceitas sem o colega ver; D2 e D5 ainda precisam ser comunicadas | Eduardo | 2026-08-15 |
+| O quê | Quem destrava | Desde | Situação |
+|---|---|---|---|
+| `src/Channel.cpp` não existe → gancho de integração parado | DOMAIN | — | **resolvido** 2026-08-15, `origin/domain` `da0165f` |
+| D1–D6 aceitas sem o colega ver; D2 e D5 precisam ser comunicadas | Eduardo | 2026-08-15 | **resolvido** 2026-08-15, DOMAIN confirmou tudo |
+| `src/ServerChannels.cpp` de verdade não existe → os handlers de DOMAIN linkam contra o stub e dão segfault no primeiro `JOIN` | TRANSPORT (passo 4.5) | 2026-08-15 | aberto |
+| D5 ainda não anotado no `ARCHITECTURE.md` §5 (passo 0) | Eduardo | 2026-08-15 | aberto |

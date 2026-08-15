@@ -196,6 +196,18 @@ Nicknames and channel names are case-insensitive, and `{}|^` are the lowercase
 forms of `[]\~`. Plain `std::tolower` is **wrong** here — use
 `utils::toIrcLower`.
 
+**Where that is enforced for channels** (Phase 2 decision, binding on both
+tracks). `Server::_channels` is keyed by `utils::toIrcLower(name)`, while
+`Channel::getName()` keeps the **original spelling** for display. So
+`findChannel`, `getOrCreateChannel` and `removeChannel` are case-insensitive at
+the seam, and a handler never normalises a channel name itself — it passes
+whatever the client sent and gets the right channel back.
+
+Getting this wrong is silent rather than loud: without the normalisation,
+`JOIN #Dev` followed by `PRIVMSG #dev` creates *two* channels, each with one
+member, and both clients sit in a room that looks empty. Nicknames get the same
+treatment through `utils::equalsIgnoreCase` in `findClientByNick`.
+
 ### Name validation
 
 `utils::isValidNickname` follows RFC 2812 §2.3.1: the first character is a
