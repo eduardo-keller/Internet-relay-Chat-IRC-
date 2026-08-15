@@ -50,6 +50,8 @@ int	main(void)
 
 	runClientTests();
 	runUtilsTests();
+	runMessageTests();
+	runRepliesTests();
 
 	std::cout << std::endl
 		<< g_passed << " passed, " << g_failed << " failed" << std::endl;

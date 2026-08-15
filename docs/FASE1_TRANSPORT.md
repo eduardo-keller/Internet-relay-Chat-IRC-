@@ -11,10 +11,15 @@ substituto dela. Onde os dois discordarem, a `PLANO.md` vence.
 
 ## Progresso
 
-**Estamos no passo 16.** Os passos 0–11 e 13–15 estão verdes: `make test` dá
-`132 passed, 0 failed`, sem warning, e `make && make` continua dizendo
-"Nothing to be done". O passo 12 segue aberto **só no `valgrind`** — o bloco
-"Pronto quando" da `PLANO.md` já está dentro da suíte e passa.
+**Estamos no passo 19.** Toda a implementação **desta trilha** está pronta: os
+passos 0–11 e 13–18 estão verdes, `make test` dá `173 passed, 0 failed` sem
+warning, e `make && make` continua dizendo "Nothing to be done". Falta o
+`valgrind` do passo 12 e o merge.
+
+Atenção ao escopo: isto é a metade TRANSPORT mais o meio compartilhado, **17 dos
+25 itens** da fase 1 no `TASKS.md`. Os 8 itens `DOMAIN` (modelo de `Channel`) são
+do colega e seguem `todo`, então a **fase 1 inteira** ainda não está pronta pela
+definição da `PLANO.md` §3.
 
 O passo 12 original foi **dividido**: a verificação (bloco "Pronto quando" +
 `valgrind`) fica aqui, agora; o PR virou o passo 19, depois da Parte B. Decisão
@@ -39,10 +44,10 @@ código estar certo e fica barato hoje; o PR é coordenação e pode esperar.
 | 13 | `utils::toIrcLower` / `equalsIgnoreCase` | ✅ feito — 96 asserções acumuladas |
 | 14 | `utils::split` / `toString` / `parseInt` | ✅ feito — 113 asserções acumuladas |
 | 15 | `utils::isValidNickname` / `isValidChannelName` | ✅ feito — 132 asserções acumuladas |
-| **16** | **`parseMessage`: prefixo, comando, params** | ⬜ **próximo** |
-| 17 | `parseMessage`: a regra do trailing | ⬜ |
-| 18 | `Replies::numeric` / `fromClient` | ⬜ |
-| 19 | Fechar a fase 1 (TASKS.md + PR) | ⬜ |
+| 16 | `parseMessage`: prefixo, comando, params | ✅ feito |
+| 17 | `parseMessage`: a regra do trailing | ✅ feito — 159 asserções acumuladas |
+| 18 | `Replies::numeric` / `fromClient` | ✅ feito — 173 asserções acumuladas |
+| **19** | **Fechar a metade TRANSPORT + SHARED (TASKS.md + merge)** | ⬜ **próximo** |
 
 ### Arquivos já criados
 
@@ -52,7 +57,11 @@ código estar certo e fica barato hoje; o PR é coordenação e pode esperar.
   nickname e de nome de canal
 - `tests/harness.hpp` — declara `check`/`checkEqual` e os pontos de entrada
 - `tests/test_client.cpp` — `runClientTests()`
+- `src/Message.cpp` — `parseMessage` e o construtor de `Message`
 - `tests/test_utils.cpp` — `runUtilsTests()`
+- `src/Replies.cpp` — `numeric` / `fromClient`
+- `tests/test_message.cpp` — `runMessageTests()`
+- `tests/test_replies.cpp` — `runRepliesTests()`
 - `tests/test_main.cpp` — editado: inclui o harness e chama os dois pontos de
   entrada
 
@@ -653,7 +662,7 @@ fase 1**. É adição pura e não muda nada existente, e o `MAX_CHANNEL_LEN` é
 justamente o que evita o colega inventar um 50 próprio no modelo de `Channel`.
 Entra nas notas do PR junto com a mudança da `ARCHITECTURE.md` §4.
 
-### ⬜ Passo 16 — `src/Message.cpp`: `parseMessage` (prefixo, comando, params)
+### ✅ Passo 16 — `src/Message.cpp`: `parseMessage` (prefixo, comando, params)
 
 **Conceitos:** a gramática
 `[ ':' prefix SPACE ] command *( SPACE middle ) [ SPACE ':' trailing ]`;
@@ -665,20 +674,71 @@ normalmente **não** mandam prefixo — quem adiciona é o servidor no repasse.
 
 **Teste:** os três exemplos da `ARCHITECTURE.md` §5, verbatim.
 
-### ⬜ Passo 17 — `parseMessage`: a regra do trailing
+**Resultado:** feito **junto com o passo 17**, porque a divisão não corta limpo:
+o primeiro dos três exemplos da §5 é `"PRIVMSG #chan :hello world"`, que já
+exige a regra do trailing para não virar dois params. Separar significaria
+escrever uma versão sabidamente errada para consertar em seguida.
+
+**Varredura manual, não `istringstream`** — e não por velocidade. O trailing tem
+de preservar os espaços internos, então no instante em que o marcador aparece o
+parser precisa de "o resto cru da linha a partir daqui", que é uma operação
+**posicional**. Com `>>` a posição é consumida e recuperá-la depois é chato de
+fazer e pior de defender. Com índice é `substr(i + 1)`.
+
+**O prefixo é parseado mesmo sem ninguém ler `msg.prefix`.** Os handlers sabem
+quem mandou pelo `Client &sender`. Mas ele precisa no mínimo ser **pulado**:
+deixe-o no lugar e `":foo PRIVMSG #chan :hi"` faz de `":foo"` o nome do comando
+e perde o comando real. Já que se pula, guardar sai de graça.
+
+**Decisão pequena, registrada em comentário:** o `parseMessage` **não** passa o
+comando para maiúsculas. A tabela de despacho é chaveada em maiúsculas
+(`ARCHITECTURE.md` §4), mas normalizar aqui destruiria informação que um parser
+não tem por que descartar — e o `421 <command> :Unknown command` devolve o
+comando ao cliente, então quem digitou `privmsgx` deve ver `privmsgx`. Quem
+converte é o dispatcher, que também é "um lugar só". Isso mora inteiro na trilha
+TRANSPORT, então não mexe no contrato.
+
+### ✅ Passo 17 — `parseMessage`: a regra do trailing
 
 **Conceitos:** o trailing começa no **primeiro `" :"`** e vai até o fim da linha,
 espaços inclusos; entra como **último elemento de `params`** com o `:` removido;
 `hasTrailing` existe porque **`":"` sozinho é um trailing vazio legal** e tem que
-ser distinguível de "nenhum parâmetro" — é o que separa `PRIVMSG #chan :` (→
-`412 ERR_NOTEXTTOSEND`) de `PRIVMSG #chan` (→ `411 ERR_NORECIPIENT`); um `:` que
+ser distinguível de "nenhum parâmetro" (ver a correção no Resultado); um `:` que
 **não** vem depois de espaço não é marcador (`PRIVMSG #chan a:b` tem um param só).
 
 **Teste:** `"PRIVMSG #chan :hello world"` → `params == ["#chan","hello world"]`;
 `"PRIVMSG #chan :"` → `hasTrailing` true e último param vazio;
 `"PRIVMSG #chan a:b"` → um param.
 
-### ⬜ Passo 18 — `src/Replies.cpp`: `numeric` / `fromClient`
+**Resultado:** 159 asserções acumuladas (27 novas, cobrindo os passos 16 e 17
+juntos).
+
+**Correção ao enunciado do teste acima:** `"PRIVMSG #chan a:b"` dá **dois**
+params, `["#chan", "a:b"]`. O "um param só" do bloco de conceitos quer dizer que
+`a:b` fica inteiro em **um** param em vez de o `:` virar marcador de trailing — a
+linha do teste ficou ambígua. O teste implementado afirma `params.size() == 2`.
+
+**O marcador é um `:` no INÍCIO de um parâmetro**, não um `:` em qualquer lugar.
+É isso que separa `PRIVMSG #chan a:b` (dois params, sem trailing) de
+`PRIVMSG #chan :a b` (dois params, o último sendo o trailing `a b`). Depois de um
+marcador de verdade tudo é conteúdo — espaços e novos `:` inclusive, o que faz
+`":see http://x for more"` chegar inteiro.
+
+**Correção de numeric, e do peso do `hasTrailing`.** O bloco de conceitos dizia
+que o `hasTrailing` separa `PRIVMSG #chan :` (`412`) de `PRIVMSG #chan` (`411`).
+Está errado. O `411 ERR_NORECIPIENT` é `:No recipient given` e o
+`PRIVMSG #chan` **tem** destinatário — o que falta é texto, que é `412`. Quem
+ganha `411` é um `PRIVMSG` pelado, sem parâmetro nenhum. Conferir contra o irssi
+na fase 3, como a `ARCHITECTURE.md` §10 manda para qualquer numeric. A tabela da
+§6 já estava certa; era só o exemplo daqui.
+
+E o `hasTrailing` pesa menos do que aquela frase sugeria: `PRIVMSG #chan :` dá
+`params.size() == 2` e `PRIVMSG #chan` dá `1`, então **o tamanho já separa os
+dois**. O valor real do campo é ser a garantia permanente de que um trailing
+vazio é *empurrado* como param em vez de sumir — uma implementação que o
+descartasse deixaria as duas linhas idênticas.
+
+### ✅ Passo 18 — `src/Replies.cpp`: `numeric` / `fromClient`
 
 **Conceitos:** as duas formas de saída ([ARCHITECTURE.md](ARCHITECTURE.md) §6);
 **zero-padding em 3 dígitos** — `RPL_WELCOME` é o `int` 1 mas tem que sair como
@@ -688,31 +748,66 @@ o bug clássico desta função); **nenhuma das duas anexa CRLF** — o `sendToCl
 irssi; `target` é o nick do destinatário, ou `*` antes do registro.
 
 **Teste:** `numeric("irc.local", 1, "*", ":Welcome")` começa com
-`":irc.local 001 * "`; conferir o padding em 1, 2, 3, 4 e que 421 sai sem
-padding; `fromClient("a!b@c", "JOIN", "#x")` → `":a!b@c JOIN #x"`.
+`":irc.local 001 * "`; conferir o padding em 1, 2, 3, 4 e que 421 sai intacto;
+`fromClient("a!b@c", "JOIN", "#x")` → `":a!b@c JOIN #x"`.
 
-### ⬜ Passo 19 — fechar a fase 1 (TASKS.md + PR)
+**Resultado:** 173 asserções acumuladas (14 novas). **Última etapa de
+implementação da fase 1.**
+
+O ponto central do passo se confirma: a RFC 2812 §2.4 define um numeric como um
+número de **três dígitos**, então o `RPL_WELCOME` (o `int` 1) tem que sair como
+`001`. Mandar `1` faz o irssi nem reconhecer a linha como numeric — ele nunca vê
+o welcome e espera para sempre.
+
+**Correção 1: "421 sai sem padding" não é bem isso.** O 421 não é um código que
+pula o padding; ele já tem três dígitos, então a mesma operação é um no-op. Ler
+como caso especial produziria um `if` sem motivo. O teste afirma que um código
+de três dígitos passa **intacto**.
+
+**Correção 2: `args` vazio deixava um espaço sobrando.** `fromClient("a!b@c",
+"QUIT", "")` daria `":a!b@c QUIT "`, e o `sendToClient` gruda o CRLF logo depois
+desse espaço — um parser estrito lê isso como um parâmetro vazio a mais. Um `if`
+em cada função resolve. Nenhum chamador da tabela de numerics manda `args` vazio
+hoje; é para a função ser total, não por causa de um bug existente.
+
+**O padding foi construído sobre o `utils::toString`**, não sobre `<iomanip>`,
+para o projeto ter um caminho só de int→string — e porque o `setw()` vale apenas
+para a próxima saída enquanto o `setfill()` é sticky, distinção que não vale a
+pena depender aqui.
+
+### ⬜ Passo 19 — fechar a metade TRANSPORT + SHARED
 
 Era a segunda metade do passo 12; foi adiado para cá de propósito.
 
-Marcar os itens `SHARED` como `done` no `TASKS.md` **no mesmo commit**. Branch
-`feat/transport-buffer`, PR (a `PLANO.md` §5 pede PR mesmo sendo dois — é o
-mecanismo de alfabetização).
+**Sem PR.** A `PLANO.md` §5 pede PR mesmo sendo dois, porque o PR é o mecanismo
+de alfabetização. Aqui não há o que alfabetizar em paralelo: o colega ainda não
+começou a trilha DOMAIN, então o merge vai direto para a `main`, de comum acordo.
+A regra do PR volta a valer da fase 2 em diante, quando as duas trilhas se tocam.
+A legenda do `TASKS.md` foi ajustada para registrar essa exceção.
 
-**No corpo do PR, avisar que a `ARCHITECTURE.md` §4 mudou:** o
-`disconnectClient` tem que retornar imediatamente quando o cliente já está
-marcado. É esclarecimento, não renegociação do seam — nada mudou de forma — mas é
-uma regra que os handlers do colega conseguem disparar (todo comando dele chama
-`sendToClient`), então vai no corpo do PR e não escondida no diff.
+**Antes do merge:** o `valgrind` (a parte do passo 12 que ficou aberta), um
+`make re` limpo, `make && make` sem relink, e o `./ircserv 6667 secret` ainda de
+pé — a fase 1 acrescentou três `.cpp` que, por causa do glob, agora linkam **no
+`ircserv` também**, então o binário da fase 0 precisa continuar funcionando.
 
-**O custo de adiar até aqui, para entrar de olhos abertos.** O `TASKS.md` é o
-cérebro compartilhado (`PLANO.md` §4), mas ele só sincroniza quando sobe.
-Enquanto a `transpor_fase_1` não for empurrada, a sessão do colega vê os 9 itens
-`TRANSPORT` como `todo` e não vê **nenhuma reivindicação nos itens `SHARED`** que
-a Parte B vai mexer. Substituto: empurrar a branch mesmo sem abrir o PR, ou
-avisar o colega direto. E um PR com `Client` + `Utils` + `Message` + `Replies`
-junto é uma revisão bem mais difícil que quatro pequenos — a alfabetização
-enfraquece conforme o diff cresce.
+**Três coisas para falar com o colega.** Não são PR, são conversa — mas duas
+delas restringem o `Channel` que ele vai escrever:
+
+1. `ARCHITECTURE.md` §4: o `disconnectClient` tem que **retornar imediatamente**
+   se o cliente já está marcado. Ele enfileira `ERROR :<reason>`, então num
+   cliente com a fila de saída cheia esse enfileiramento falha e volta para o
+   próprio `disconnectClient` — recursão infinita. É alcançável a partir de
+   qualquer handler dele, porque todo comando chama `sendToClient`.
+2. `ARCHITECTURE.md` §5: **`#` é o único prefixo de canal**, e o nickname vai até
+   30. Se ele aceitar `&`, vocês divergem no primeiro `JOIN`.
+3. `Limits.hpp` ganhou `MAX_NICKNAME_LEN` (30) e `MAX_CHANNEL_LEN` (50). É a
+   única edição de header da fase 1, puramente aditiva — e é justamente o que
+   evita ele inventar um 50 próprio no modelo de `Channel`.
+
+**Isto não fecha a fase 1.** Pela `PLANO.md` §3, a fase 1 só está pronta quando o
+modelo de `Channel` também estiver construído e testado — são 8 itens `DOMAIN`
+ainda `todo`. O que fecha aqui são **17 dos 25 itens**: a trilha TRANSPORT
+inteira mais o meio compartilhado. A fase completa depende do colega.
 
 ---
 

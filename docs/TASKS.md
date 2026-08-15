@@ -7,7 +7,13 @@ Rótulos em português; identificadores, nomes de arquivo e de comandos em ingl�
 (são artefatos do código).
 
 **Status:** `todo` → `doing` → `done` (funciona e tem teste) → `integrated`
-(mergeado na `main` via PR, revisado pelo colega).
+(mergeado na `main`).
+
+> A definição de `integrated` era "mergeado na `main` **via PR, revisado pelo
+> colega**". A fase 1 (TRANSPORT + SHARED) foi para a `main` **direto, sem PR**,
+> de comum acordo: o colega ainda não tinha começado a trilha DOMAIN, então não
+> havia nada em paralelo para revisar. A regra do PR volta a valer da fase 2 em
+> diante, quando as duas trilhas passam a se tocar.
 
 **Donos:** `TRANSPORT` (Eduardo) · `DOMAIN` (colega) · `SHARED` (quem pegar
 primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
@@ -39,8 +45,8 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `utils::toString` / `parseInt` | SHARED (Eduardo) | done |
 | `utils::isValidNickname` | SHARED (Eduardo) | done |
 | `utils::isValidChannelName` | SHARED (Eduardo) | done |
-| `parseMessage` — prefixo, comando, params | SHARED (Eduardo) | todo |
-| `parseMessage` — regra do trailing (`:`) | SHARED (Eduardo) | todo |
+| `parseMessage` — prefixo, comando, params | SHARED (Eduardo) | done |
+| `parseMessage` — regra do trailing (`:`) | SHARED (Eduardo) | done |
 | `Client` — OCF, getters/setters, `prefix()` | TRANSPORT | done |
 | `Client` — flags de registro (`isRegistered`) | TRANSPORT | done |
 | `Client::appendToReadBuffer` / `extractCommand` | TRANSPORT | done |
@@ -58,7 +64,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `Channel` — modo `k` (key) | DOMAIN | todo |
 | `Channel` — modo `l` (limit) | DOMAIN | todo |
 | `Channel::modeString` | DOMAIN | todo |
-| `Replies::numeric` / `Replies::fromClient` | SHARED (Eduardo) | todo |
+| `Replies::numeric` / `Replies::fromClient` | SHARED (Eduardo) | done |
 
 ---
 
