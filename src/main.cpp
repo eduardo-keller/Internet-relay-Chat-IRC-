@@ -1,20 +1,14 @@
 #include <cstdlib>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
-#include "Channel.hpp"
-#include "Client.hpp"
-#include "Command.hpp"
-#include "Limits.hpp"
-#include "Message.hpp"
-#include "Replies.hpp"
 #include "Server.hpp"
-#include "Utils.hpp"
 
-// Phase 0 skeleton: validates the command line and exits.
-// Phase 2 replaces the body of main() with `Server server(port, password);
-// server.run();`. Everything above is included so that `make` proves all
-// contract headers still compile under -Wall -Wextra -Werror -std=c++98.
+// ./ircserv <port> <password>
+//
+// Argument validation, then hand over to Server::run(), which owns everything
+// from the listening socket onwards.
 
 static bool	parsePort(const std::string &arg, int &port)
 {
@@ -55,7 +49,20 @@ int	main(int argc, char **argv)
 		return (1);
 	}
 
-	std::cout << "ircserv: would listen on port " << port
-		<< " (not implemented yet)" << std::endl;
+	// An uncaught exception calls std::terminate, and terminating IS "quitting
+	// unexpectedly" — the subject's grade-zero rule. Catching here turns a
+	// failed bind into a message and exit(1), and unwinding through this catch
+	// still runs ~Server, so the fds are closed on the way out.
+	try
+	{
+		Server	server(port, password);
+
+		server.run();
+	}
+	catch (const std::exception &e)
+	{
+		std::cerr << "Error: " << e.what() << std::endl;
+		return (1);
+	}
 	return (0);
 }

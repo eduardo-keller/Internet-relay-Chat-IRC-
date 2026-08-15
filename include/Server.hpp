@@ -96,6 +96,9 @@ class Server
 		Server	&operator=(const Server &other);
 
 		// --- transport track internals; not part of the contract ----------
+		// SIGPIPE ignored, SIGINT/SIGTERM turned into a flag run() polls.
+		// Called by run() before any socket exists.
+		void	installSignalHandlers();
 		void	setupListenSocket();
 		void	acceptNewClient();
 		void	handleReadable(int fd);
@@ -105,6 +108,17 @@ class Server
 		// handled: flushes, closes and deletes every client marked by
 		// disconnectClient. The only place a Client is ever deleted.
 		void	reapDisconnected();
+
+		// The two Channel-facing internals. Their bodies live in their own
+		// translation unit, so that Server links while src/Channel.cpp does
+		// not exist yet: any call to a Channel method is an undefined
+		// reference without it. See docs/FASE2.md section 3.
+		//
+		// sweepChannels drops a client from every member, operator and invite
+		// set before reapDisconnected deletes it — Channel holds non-owning
+		// Client*, so skipping this leaves dangling pointers behind.
+		void	sweepChannels(Client &client);
+		void	clearAllChannels();
 
 		int								_port;
 		std::string						_password;

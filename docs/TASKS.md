@@ -72,8 +72,8 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 
 | Item | Dono | Status |
 |---|---|---|
-| `socket` / `setsockopt` / `bind` / `listen` | TRANSPORT | todo |
-| `fcntl(fd, F_SETFL, O_NONBLOCK)` em todo fd | TRANSPORT | todo |
+| `socket` / `setsockopt` / `bind` / `listen` | TRANSPORT | done |
+| `fcntl(fd, F_SETFL, O_NONBLOCK)` em todo fd | TRANSPORT | doing (socket de escuta feito; os aceitos vêm no passo 2) |
 | **Laço de `poll()` (sessão conjunta)** | BOTH | todo |
 | `accept` de novo cliente + entrada no `_pollFds` | TRANSPORT | todo |
 | `recv` → `appendToReadBuffer` → drenar linhas | TRANSPORT | todo |
@@ -84,10 +84,10 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | Despacho para de extrair linhas se `isDisconnecting()` | TRANSPORT | todo |
 | `buildCommandTable` + despacho | TRANSPORT | todo |
 | Porta do registro no despacho (`451`) | TRANSPORT | todo |
-| **`signal(SIGPIPE, SIG_IGN)`** — sem isso o processo morre | TRANSPORT | todo |
-| `signal` para `SIGINT` (shutdown sem vazar) | TRANSPORT | todo |
+| **`signal(SIGPIPE, SIG_IGN)`** — sem isso o processo morre | TRANSPORT | done |
+| `signal` para `SIGINT` (shutdown sem vazar) | TRANSPORT | done |
 | `EAGAIN`/`EWOULDBLOCK` não é erro nem desconexão | TRANSPORT | todo |
-| `EINTR` repete a chamada | TRANSPORT | todo |
+| `EINTR` repete a chamada | TRANSPORT | doing (feito no `poll`; falta `recv`/`send`) |
 | `POLLHUP` / `POLLERR` / `POLLNVAL` tratados | TRANSPORT | todo |
 | `cmdPass` (+ `462`, `464`) | TRANSPORT | todo |
 | `cmdNick` (+ `431`, `432`, `433`) | TRANSPORT | todo |

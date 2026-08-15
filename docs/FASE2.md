@@ -21,7 +21,7 @@ para ser defendida linha a linha na avaliação.
 | # | Passo | Entrega observável | Status |
 |---|---|---|---|
 | 0 | Decisões e reserva de nomes | `TASKS.md` atualizado, colega avisado | todo |
-| 1 | Socket de escuta, sem `poll()` | `ss -ltn` mostra a porta; SIGINT sai limpo | todo |
+| 1 | Socket de escuta, sem `poll()` | `ss -ltn` mostra a porta; SIGINT sai limpo | done |
 | 2 | Esqueleto do `poll()` + `accept` + reap | 3 clientes simultâneos, 0% de CPU ocioso | todo |
 | 3 | Caminho de leitura (`recv` → buffer → linhas) | **teste do subject (`com^Dman^Dd`) passa** | todo |
 | 4 | Caminho de escrita (`sendToClient` + `POLLOUT`) | truncagem em 510 e SendQ no `make test` | todo |
@@ -160,7 +160,7 @@ Antes de qualquer código, porque é o que impede as duas sessões de divergirem
 
 ### Passo 1 — Socket de escuta, sem `poll()` ainda
 
-**Status:** `todo`
+**Status:** `done` — 2026-08-15
 
 **Escrever:** `src/Server.cpp` (construtor, destrutor, `stop`,
 `setupListenSocket`), `src/ServerChannels.stub.cpp`, os dois helpers privados no
@@ -187,11 +187,11 @@ valgrind --leak-check=full ./ircserv 6667 secret   # Ctrl+C -> 0 vazamentos
 make test                               # continua verde: o stub linka
 ```
 
-- [ ] `ss -ltn` mostra a porta
-- [ ] segundo bind falha limpo
-- [ ] SIGINT sai com código 0
-- [ ] valgrind sem vazamento
-- [ ] `make test` verde
+- [x] `ss -ltn` mostra a porta
+- [x] segundo bind falha limpo (`Error: bind: Address already in use`, exit 1)
+- [x] SIGINT sai com código 0, imprimindo `shutting down` (destrutor roda)
+- [x] valgrind sem vazamento, nos dois caminhos: shutdown normal e `bind` falho
+- [x] `make test` verde (173 passed) e `make && make` sem relink
 
 **Saber explicar:** por que `SO_REUSEADDR` (TIME_WAIT no endereço de escuta);
 por que o socket de escuta também é não bloqueante (`accept` pode bloquear
