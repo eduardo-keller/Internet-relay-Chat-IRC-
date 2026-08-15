@@ -1,4 +1,5 @@
 #include "Channel.hpp"
+#include "Utils.hpp"
 
 // Pure domain state. Channel does not own the Client pointers held by its
 // sets, and no network operation belongs in this class.
@@ -247,4 +248,29 @@ void	Channel::clearUserLimit()
 {
 	_hasUserLimit = false;
 	_userLimit = 0;
+}
+
+// RPL_CHANNELMODEIS needs deterministic flag and parameter order. The boolean
+// follows the shared contract literally: false keeps the flags visible while
+// hiding both key and limit values from the caller.
+std::string	Channel::modeString(bool includeParams) const
+{
+	std::string	modes("+");
+
+	if (_inviteOnly)
+		modes += "i";
+	if (_topicRestricted)
+		modes += "t";
+	if (_hasKey)
+		modes += "k";
+	if (_hasUserLimit)
+		modes += "l";
+	if (includeParams)
+	{
+		if (_hasKey)
+			modes += " " + _key;
+		if (_hasUserLimit)
+			modes += " " + utils::toString(static_cast<int>(_userLimit));
+	}
+	return (modes);
 }

@@ -3,6 +3,8 @@
 
 #include "harness.hpp"
 
+#include <climits>
+
 // Unit tests for the DOMAIN track's Channel. The model is pure state: no
 // socket, fd or Server is involved anywhere in this file.
 
@@ -371,6 +373,66 @@ static void	testUserLimitMode(void)
 		"channel limit: assignment replaces l and its value");
 }
 
+static void	testModeString(void)
+{
+	Channel	channel("#chat");
+
+	checkEqual(channel.modeString(true), "+",
+		"channel mode string: no active mode renders plus");
+	checkEqual(channel.modeString(false), "+",
+		"channel mode string: hiding absent params still renders plus");
+
+	channel.setInviteOnly(true);
+	checkEqual(channel.modeString(true), "+i",
+		"channel mode string: i renders without a parameter");
+	channel.setTopicRestricted(true);
+	checkEqual(channel.modeString(true), "+it",
+		"channel mode string: i and t use stable order");
+	channel.setInviteOnly(false);
+	checkEqual(channel.modeString(true), "+t",
+		"channel mode string: t can render on its own");
+	channel.setTopicRestricted(false);
+
+	channel.setKey("secret");
+	checkEqual(channel.modeString(true), "+k secret",
+		"channel mode string: k includes its key when requested");
+	checkEqual(channel.modeString(false), "+k",
+		"channel mode string: k hides its key when params are excluded");
+	channel.clearKey();
+
+	channel.setUserLimit(10);
+	checkEqual(channel.modeString(true), "+l 10",
+		"channel mode string: l includes its limit when requested");
+	checkEqual(channel.modeString(false), "+l",
+		"channel mode string: l hides its limit when params are excluded");
+	channel.clearUserLimit();
+
+	// Enable in reverse order to prove output order depends on mode names,
+	// not on the order in which setters happened to be called.
+	channel.setUserLimit(10);
+	channel.setKey("secret");
+	channel.setTopicRestricted(true);
+	channel.setInviteOnly(true);
+	checkEqual(channel.modeString(true), "+itkl secret 10",
+		"channel mode string: all modes and params use canonical order");
+	checkEqual(channel.modeString(false), "+itkl",
+		"channel mode string: all params can be excluded");
+
+	channel.clearKey();
+	checkEqual(channel.modeString(true), "+itl 10",
+		"channel mode string: clearing k removes its flag and old key");
+	channel.setKey("secret");
+	channel.clearUserLimit();
+	checkEqual(channel.modeString(true), "+itk secret",
+		"channel mode string: clearing l removes its flag and old limit");
+
+	Channel	maxLimit("#max");
+
+	maxLimit.setUserLimit(static_cast<std::size_t>(INT_MAX));
+	checkEqual(maxLimit.modeString(true), "+l 2147483647",
+		"channel mode string: INT_MAX converts without narrowing loss");
+}
+
 static void	testOrthodoxCanonicalForm(void)
 {
 	Client	alice(3, "localhost");
@@ -382,6 +444,11 @@ static void	testOrthodoxCanonicalForm(void)
 	original.addMember(&alice);
 	original.addMember(&bob);
 	original.addOperator(&alice);
+	original.addInvite(&outsider);
+	original.setInviteOnly(true);
+	original.setTopicRestricted(true);
+	original.setKey("full-secret");
+	original.setUserLimit(50);
 
 	Channel	copied(original);
 
@@ -394,19 +461,29 @@ static void	testOrthodoxCanonicalForm(void)
 		"channel OCF: copy constructor preserves members");
 	check(copied.isOperator(&alice),
 		"channel OCF: copy constructor preserves operators");
-	check(!copied.isInviteOnly() && !copied.isTopicRestricted()
-		&& !copied.hasKey() && !copied.hasUserLimit(),
-		"channel OCF: copy constructor preserves initial mode state");
+	check(copied.isInvited(&outsider),
+		"channel OCF: copy constructor preserves invitations");
+	check(copied.modeString(true) == "+itkl full-secret 50",
+		"channel OCF: copy constructor preserves all active modes");
 
 	copied.setTopic("Copied topic");
 	copied.removeMember(&bob);
 	copied.removeOperator(&alice);
+	copied.removeInvite(&outsider);
+	copied.setInviteOnly(false);
+	copied.setTopicRestricted(false);
+	copied.clearKey();
+	copied.clearUserLimit();
 	checkEqual(original.getTopic(), "Original topic",
 		"channel OCF: changing the copy does not change the original topic");
 	check(original.memberCount() == 2 && original.isMember(&bob),
 		"channel OCF: changing copied members does not change the original");
 	check(original.isOperator(&alice),
 		"channel OCF: changing copied operators does not change the original");
+	check(original.isInvited(&outsider),
+		"channel OCF: changing copied invites does not change the original");
+	check(original.modeString(true) == "+itkl full-secret 50",
+		"channel OCF: changing copied modes does not change the original");
 
 	Channel	assigned("#old");
 
@@ -423,6 +500,10 @@ static void	testOrthodoxCanonicalForm(void)
 		"channel OCF: assignment replaces the member set");
 	check(assigned.isOperator(&alice) && !assigned.isOperator(&outsider),
 		"channel OCF: assignment replaces the operator set");
+	check(assigned.isInvited(&outsider),
+		"channel OCF: assignment replaces the invitation set");
+	check(assigned.modeString(true) == "+itkl full-secret 50",
+		"channel OCF: assignment replaces all mode state");
 
 	assigned.removeMember(&alice);
 	check(original.isMember(&alice),
@@ -456,5 +537,6 @@ void	runChannelTests(void)
 	testBooleanModes();
 	testKeyMode();
 	testUserLimitMode();
+	testModeString();
 	testOrthodoxCanonicalForm();
 }

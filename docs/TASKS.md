@@ -63,7 +63,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `Channel` — modos `i` e `t` | DOMAIN | done |
 | `Channel` — modo `k` (key) | DOMAIN | done |
 | `Channel` — modo `l` (limit) | DOMAIN | done |
-| `Channel::modeString` | DOMAIN | todo |
+| `Channel::modeString` | DOMAIN | done |
 | `Replies::numeric` / `Replies::fromClient` | SHARED (Eduardo) | done |
 
 ---
