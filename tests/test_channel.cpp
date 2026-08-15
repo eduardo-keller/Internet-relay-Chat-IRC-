@@ -318,6 +318,59 @@ static void	testKeyMode(void)
 		"channel key: assignment replaces k and its value");
 }
 
+static void	testUserLimitMode(void)
+{
+	Channel	channel("#chat");
+
+	check(!channel.hasUserLimit() && channel.getUserLimit() == 0,
+		"channel limit: l starts disabled with a zero value");
+
+	channel.setInviteOnly(true);
+	channel.setTopicRestricted(true);
+	channel.setKey("secret");
+	channel.setUserLimit(10);
+	check(channel.hasUserLimit(),
+		"channel limit: setting a limit enables l");
+	check(channel.getUserLimit() == 10,
+		"channel limit: the configured value is preserved");
+	check(channel.isInviteOnly() && channel.isTopicRestricted()
+		&& channel.hasKey(),
+		"channel limit: setting l does not change i, t or k");
+
+	channel.setUserLimit(25);
+	check(channel.hasUserLimit() && channel.getUserLimit() == 25,
+		"channel limit: setting a second value replaces the first");
+
+	channel.clearUserLimit();
+	check(!channel.hasUserLimit(),
+		"channel limit: clearing the limit disables l");
+	check(channel.getUserLimit() == 0,
+		"channel limit: clearing l resets the stored value to zero");
+	check(channel.isInviteOnly() && channel.isTopicRestricted()
+		&& channel.hasKey(),
+		"channel limit: clearing l does not change i, t or k");
+
+	channel.clearUserLimit();
+	check(!channel.hasUserLimit() && channel.getUserLimit() == 0,
+		"channel limit: clearing l twice is idempotent");
+
+	channel.setUserLimit(42);
+	Channel	copied(channel);
+
+	check(copied.hasUserLimit() && copied.getUserLimit() == 42,
+		"channel limit: copy construction preserves l and its value");
+	copied.clearUserLimit();
+	check(channel.hasUserLimit() && channel.getUserLimit() == 42,
+		"channel limit: clearing a copied limit does not change the original");
+
+	Channel	assigned("#other");
+
+	assigned.setUserLimit(3);
+	assigned = channel;
+	check(assigned.hasUserLimit() && assigned.getUserLimit() == 42,
+		"channel limit: assignment replaces l and its value");
+}
+
 static void	testOrthodoxCanonicalForm(void)
 {
 	Client	alice(3, "localhost");
@@ -402,5 +455,6 @@ void	runChannelTests(void)
 	testInvites();
 	testBooleanModes();
 	testKeyMode();
+	testUserLimitMode();
 	testOrthodoxCanonicalForm();
 }

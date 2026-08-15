@@ -234,3 +234,17 @@ std::size_t	Channel::getUserLimit() const
 {
 	return (_userLimit);
 }
+
+// Parsing and positive-range validation belong to cmdMode. Channel stores the
+// accepted value and resets it when mode l is removed.
+void	Channel::setUserLimit(std::size_t limit)
+{
+	_userLimit = limit;
+	_hasUserLimit = true;
+}
+
+void	Channel::clearUserLimit()
+{
+	_hasUserLimit = false;
+	_userLimit = 0;
+}
