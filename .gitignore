@@ -12,3 +12,6 @@ run_tests
 .idea/
 .DS_Store
 *.swp
+
+# personal working doc for the transport track; not part of the shared contract
+docs/FASE1_TRANSPORT.md
