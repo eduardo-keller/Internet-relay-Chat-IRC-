@@ -211,6 +211,20 @@ const std::string	&Channel::getKey() const
 	return (_key);
 }
 
+// Parameter validation belongs to cmdMode. Channel only records that a key
+// is active and clears both pieces of state when mode k is removed.
+void	Channel::setKey(const std::string &key)
+{
+	_key = key;
+	_hasKey = true;
+}
+
+void	Channel::clearKey()
+{
+	_hasKey = false;
+	_key.clear();
+}
+
 bool	Channel::hasUserLimit() const
 {
 	return (_hasUserLimit);

@@ -61,7 +61,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `Channel` — operadores | DOMAIN | done |
 | `Channel` — lista de convites (guarda `Client*`, não nick) | DOMAIN | done |
 | `Channel` — modos `i` e `t` | DOMAIN | done |
-| `Channel` — modo `k` (key) | DOMAIN | todo |
+| `Channel` — modo `k` (key) | DOMAIN | done |
 | `Channel` — modo `l` (limit) | DOMAIN | todo |
 | `Channel::modeString` | DOMAIN | todo |
 | `Replies::numeric` / `Replies::fromClient` | SHARED (Eduardo) | done |

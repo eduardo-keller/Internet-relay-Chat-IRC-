@@ -268,6 +268,56 @@ static void	testBooleanModes(void)
 		"channel modes: assignment preserves i and t");
 }
 
+static void	testKeyMode(void)
+{
+	Channel	channel("#chat");
+
+	check(!channel.hasKey() && channel.getKey().empty(),
+		"channel key: k starts disabled with no stored key");
+
+	channel.setInviteOnly(true);
+	channel.setTopicRestricted(true);
+	channel.setKey("secret");
+	check(channel.hasKey(),
+		"channel key: setting a key enables k");
+	checkEqual(channel.getKey(), "secret",
+		"channel key: the configured key is preserved");
+	check(channel.isInviteOnly() && channel.isTopicRestricted(),
+		"channel key: setting k does not change i or t");
+
+	channel.setKey("new-secret");
+	check(channel.hasKey() && channel.getKey() == "new-secret",
+		"channel key: setting a second key replaces the first");
+
+	channel.clearKey();
+	check(!channel.hasKey(),
+		"channel key: clearing the key disables k");
+	check(channel.getKey().empty(),
+		"channel key: clearing k erases the stored value");
+	check(channel.isInviteOnly() && channel.isTopicRestricted(),
+		"channel key: clearing k does not change i or t");
+
+	channel.clearKey();
+	check(!channel.hasKey() && channel.getKey().empty(),
+		"channel key: clearing k twice is idempotent");
+
+	channel.setKey("copy-secret");
+	Channel	copied(channel);
+
+	check(copied.hasKey() && copied.getKey() == "copy-secret",
+		"channel key: copy construction preserves k and its value");
+	copied.clearKey();
+	check(channel.hasKey() && channel.getKey() == "copy-secret",
+		"channel key: clearing a copied key does not change the original");
+
+	Channel	assigned("#other");
+
+	assigned.setKey("old-secret");
+	assigned = channel;
+	check(assigned.hasKey() && assigned.getKey() == "copy-secret",
+		"channel key: assignment replaces k and its value");
+}
+
 static void	testOrthodoxCanonicalForm(void)
 {
 	Client	alice(3, "localhost");
@@ -351,5 +401,6 @@ void	runChannelTests(void)
 	testOperators();
 	testInvites();
 	testBooleanModes();
+	testKeyMode();
 	testOrthodoxCanonicalForm();
 }
