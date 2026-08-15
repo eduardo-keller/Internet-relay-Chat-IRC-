@@ -251,6 +251,45 @@ static void	testIndependentClientRoles(void)
 		"channel roles: explicit cleanup removes every independent role");
 }
 
+static void	testClientPointerIdentity(void)
+{
+	Channel	channel("#chat");
+	Client	alice(3, "localhost");
+	Client	sameNickname(4, "localhost");
+
+	alice.setNickname("alice");
+	sameNickname.setNickname("alice");
+	channel.addMember(&alice);
+	channel.addOperator(&alice);
+	channel.addInvite(&alice);
+	check(channel.isMember(&alice) && channel.isOperator(&alice)
+		&& channel.isInvited(&alice),
+		"channel identity: every role records the original Client pointer");
+	check(!channel.isMember(&sameNickname)
+		&& !channel.isOperator(&sameNickname)
+		&& !channel.isInvited(&sameNickname),
+		"channel identity: an equal nickname is not an equal Client");
+
+	alice.setNickname("renamed-alice");
+	check(channel.isMember(&alice) && channel.isOperator(&alice)
+		&& channel.isInvited(&alice),
+		"channel identity: a nickname change preserves every role");
+
+	channel.removeMember(&sameNickname);
+	channel.removeOperator(&sameNickname);
+	channel.removeInvite(&sameNickname);
+	check(channel.isMember(&alice) && channel.isOperator(&alice)
+		&& channel.isInvited(&alice),
+		"channel identity: a lookalike Client cannot remove stored roles");
+
+	channel.removeMember(&alice);
+	channel.removeOperator(&alice);
+	channel.removeInvite(&alice);
+	check(channel.isEmpty() && !channel.isOperator(&alice)
+		&& !channel.isInvited(&alice),
+		"channel identity: the original pointer removes every stored role");
+}
+
 static void	testBooleanModes(void)
 {
 	Channel	channel("#chat");
@@ -566,6 +605,7 @@ void	runChannelTests(void)
 	testOperators();
 	testInvites();
 	testIndependentClientRoles();
+	testClientPointerIdentity();
 	testBooleanModes();
 	testKeyMode();
 	testUserLimitMode();
