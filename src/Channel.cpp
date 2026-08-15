@@ -184,9 +184,21 @@ bool	Channel::isInviteOnly() const
 	return (_inviteOnly);
 }
 
+// Channel stores mode state only. JOIN and TOPIC handlers interpret these
+// flags and decide which numeric reply or mutation is allowed.
+void	Channel::setInviteOnly(bool value)
+{
+	_inviteOnly = value;
+}
+
 bool	Channel::isTopicRestricted() const
 {
 	return (_topicRestricted);
+}
+
+void	Channel::setTopicRestricted(bool value)
+{
+	_topicRestricted = value;
 }
 
 bool	Channel::hasKey() const

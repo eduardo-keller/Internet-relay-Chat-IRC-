@@ -218,6 +218,56 @@ static void	testInvites(void)
 		"channel invites: removing NULL is safe");
 }
 
+static void	testBooleanModes(void)
+{
+	Channel	channel("#chat");
+
+	check(!channel.isInviteOnly() && !channel.isTopicRestricted(),
+		"channel modes: i and t start disabled");
+
+	channel.setInviteOnly(true);
+	check(channel.isInviteOnly() && !channel.isTopicRestricted(),
+		"channel modes: enabling i does not change t");
+	channel.setInviteOnly(true);
+	check(channel.isInviteOnly(),
+		"channel modes: enabling i twice is idempotent");
+
+	channel.setTopicRestricted(true);
+	check(channel.isInviteOnly() && channel.isTopicRestricted(),
+		"channel modes: enabling t does not change i");
+	channel.setTopicRestricted(true);
+	check(channel.isTopicRestricted(),
+		"channel modes: enabling t twice is idempotent");
+
+	channel.setInviteOnly(false);
+	check(!channel.isInviteOnly() && channel.isTopicRestricted(),
+		"channel modes: disabling i does not change t");
+	channel.setInviteOnly(false);
+	check(!channel.isInviteOnly(),
+		"channel modes: disabling i twice is idempotent");
+
+	channel.setTopicRestricted(false);
+	check(!channel.isInviteOnly() && !channel.isTopicRestricted(),
+		"channel modes: disabling t leaves both modes disabled");
+
+	channel.setInviteOnly(true);
+	channel.setTopicRestricted(true);
+	Channel	copied(channel);
+
+	check(copied.isInviteOnly() && copied.isTopicRestricted(),
+		"channel modes: copy construction preserves i and t");
+	copied.setInviteOnly(false);
+	copied.setTopicRestricted(false);
+	check(channel.isInviteOnly() && channel.isTopicRestricted(),
+		"channel modes: changing copied modes does not change the original");
+
+	Channel	assigned("#other");
+
+	assigned = channel;
+	check(assigned.isInviteOnly() && assigned.isTopicRestricted(),
+		"channel modes: assignment preserves i and t");
+}
+
 static void	testOrthodoxCanonicalForm(void)
 {
 	Client	alice(3, "localhost");
@@ -300,5 +350,6 @@ void	runChannelTests(void)
 	testMembers();
 	testOperators();
 	testInvites();
+	testBooleanModes();
 	testOrthodoxCanonicalForm();
 }

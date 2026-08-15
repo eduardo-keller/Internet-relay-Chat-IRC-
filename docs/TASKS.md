@@ -60,7 +60,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `Channel` — membros (`add`/`remove`/`isMember`) | DOMAIN | done |
 | `Channel` — operadores | DOMAIN | done |
 | `Channel` — lista de convites (guarda `Client*`, não nick) | DOMAIN | done |
-| `Channel` — modos `i` e `t` | DOMAIN | todo |
+| `Channel` — modos `i` e `t` | DOMAIN | done |
 | `Channel` — modo `k` (key) | DOMAIN | todo |
 | `Channel` — modo `l` (limit) | DOMAIN | todo |
 | `Channel::modeString` | DOMAIN | todo |
