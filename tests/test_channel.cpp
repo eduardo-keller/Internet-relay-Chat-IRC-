@@ -154,10 +154,86 @@ static void	testOperators(void)
 		"channel operators: removing NULL is safe");
 }
 
+static void	testOrthodoxCanonicalForm(void)
+{
+	Client	alice(3, "localhost");
+	Client	bob(4, "localhost");
+	Client	outsider(5, "localhost");
+	Channel	original("#original");
+
+	original.setTopic("Original topic");
+	original.addMember(&alice);
+	original.addMember(&bob);
+	original.addOperator(&alice);
+
+	Channel	copied(original);
+
+	checkEqual(copied.getName(), "#original",
+		"channel OCF: copy constructor preserves the name");
+	checkEqual(copied.getTopic(), "Original topic",
+		"channel OCF: copy constructor preserves the topic");
+	check(copied.memberCount() == 2 && copied.isMember(&alice)
+		&& copied.isMember(&bob),
+		"channel OCF: copy constructor preserves members");
+	check(copied.isOperator(&alice),
+		"channel OCF: copy constructor preserves operators");
+	check(!copied.isInviteOnly() && !copied.isTopicRestricted()
+		&& !copied.hasKey() && !copied.hasUserLimit(),
+		"channel OCF: copy constructor preserves initial mode state");
+
+	copied.setTopic("Copied topic");
+	copied.removeMember(&bob);
+	copied.removeOperator(&alice);
+	checkEqual(original.getTopic(), "Original topic",
+		"channel OCF: changing the copy does not change the original topic");
+	check(original.memberCount() == 2 && original.isMember(&bob),
+		"channel OCF: changing copied members does not change the original");
+	check(original.isOperator(&alice),
+		"channel OCF: changing copied operators does not change the original");
+
+	Channel	assigned("#old");
+
+	assigned.setTopic("Old topic");
+	assigned.addMember(&outsider);
+	assigned.addOperator(&outsider);
+	assigned = original;
+	checkEqual(assigned.getName(), "#original",
+		"channel OCF: assignment replaces the name");
+	checkEqual(assigned.getTopic(), "Original topic",
+		"channel OCF: assignment replaces the topic");
+	check(assigned.memberCount() == 2 && assigned.isMember(&alice)
+		&& assigned.isMember(&bob) && !assigned.isMember(&outsider),
+		"channel OCF: assignment replaces the member set");
+	check(assigned.isOperator(&alice) && !assigned.isOperator(&outsider),
+		"channel OCF: assignment replaces the operator set");
+
+	assigned.removeMember(&alice);
+	check(original.isMember(&alice),
+		"channel OCF: assigned member set is independent from the original");
+
+	Channel	*alias = &assigned;
+
+	assigned = *alias;
+	check(assigned.getName() == "#original" && assigned.isMember(&bob)
+		&& assigned.isOperator(&alice),
+		"channel OCF: self-assignment leaves the object intact");
+
+	{
+		Channel	temporary(original);
+
+		check(temporary.isMember(&alice),
+			"channel OCF: a temporary copy sees the original client pointer");
+	}
+	alice.setNickname("still-alive");
+	checkEqual(alice.getNickname(), "still-alive",
+		"channel OCF: destroying a copy does not destroy its clients");
+}
+
 void	runChannelTests(void)
 {
 	testIdentityAndTopic();
 	testInitialState();
 	testMembers();
 	testOperators();
+	testOrthodoxCanonicalForm();
 }

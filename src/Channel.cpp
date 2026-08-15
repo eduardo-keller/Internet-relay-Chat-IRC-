@@ -33,6 +33,40 @@ Channel::Channel(const std::string &name) :
 {
 }
 
+Channel::Channel(const Channel &other) :
+	_name(other._name),
+	_topic(other._topic),
+	_members(other._members),
+	_operators(other._operators),
+	_invited(other._invited),
+	_inviteOnly(other._inviteOnly),
+	_topicRestricted(other._topicRestricted),
+	_hasKey(other._hasKey),
+	_key(other._key),
+	_hasUserLimit(other._hasUserLimit),
+	_userLimit(other._userLimit)
+{
+}
+
+Channel	&Channel::operator=(const Channel &other)
+{
+	if (this != &other)
+	{
+		_name = other._name;
+		_topic = other._topic;
+		_members = other._members;
+		_operators = other._operators;
+		_invited = other._invited;
+		_inviteOnly = other._inviteOnly;
+		_topicRestricted = other._topicRestricted;
+		_hasKey = other._hasKey;
+		_key = other._key;
+		_hasUserLimit = other._hasUserLimit;
+		_userLimit = other._userLimit;
+	}
+	return (*this);
+}
+
 Channel::~Channel()
 {
 }

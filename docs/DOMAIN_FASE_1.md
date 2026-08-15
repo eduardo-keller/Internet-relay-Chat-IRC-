@@ -123,8 +123,13 @@ como `0` usando lista de inicialização.
 make test
 ```
 
-Marque `Channel — OCF, nome, tópico` como `doing`; ele só vira `done` depois do
-teste completo de cópia e atribuição no Passo 8.
+Marque `Channel — OCF, nome, tópico` como `doing`. Para concluir os três
+primeiros itens de `Channel` na ordem de `TASKS.md`, complete membros e
+operadores nos Passos 2 e 3 e então implemente imediatamente o construtor de
+cópia e `operator=` usando os testes de OCF descritos no Passo 8. Depois dessa
+verificação, o item pode virar `done`. Quando convites e modos estiverem
+prontos, o Passo 8 será retomado apenas para ampliar a regressão do OCF com o
+estado completo.
 
 ## 5. Passo 2 — Membros
 
@@ -314,9 +319,11 @@ make test
 
 Com os testes verdes, marque `Channel — modo l (limit)` como `done`.
 
-## 11. Passo 8 — OCF completo
+## 11. Passo 8 — Regressão do OCF com estado completo
 
-Agora que todo o estado existe, prove a Forma Canônica Ortodoxa por
+O construtor de cópia e `operator=` já podem ser implementados depois dos
+Passos 2 e 3 para concluir o primeiro item de `TASKS.md`. Quando todo o estado
+existir, volte a esta seção e amplie a prova da Forma Canônica Ortodoxa por
 comportamento. A cópia dos conjuntos é uma cópia dos containers; os ponteiros
 continuam apontando para os mesmos `Client` existentes e continuam sendo não
 proprietários.
@@ -341,10 +348,11 @@ Teste então:
   testes de `Client` para evitar warning de autoatribuição sob `-Werror`;
 - destruir uma cópia não destrói os objetos `Client` apontados.
 
-### Implementação mínima
+### Revisão da implementação
 
-Implemente ou complete o construtor de cópia e `operator=` copiando todos os
-campos. Proteja a atribuição com `if (this != &other)`.
+Confirme que o construtor de cópia e `operator=` copiam todos os campos,
+inclusive convites, modos, chave e limite. Proteja a atribuição com
+`if (this != &other)`.
 
 O destrutor não executa `delete` em membro, operador ou convidado. Os conjuntos
 são destruídos automaticamente.
@@ -355,7 +363,9 @@ são destruídos automaticamente.
 make test
 ```
 
-Com os testes verdes, marque `Channel — OCF, nome, tópico` como `done`.
+Se o item `Channel — OCF, nome, tópico` ainda estiver como `doing`, marque-o
+como `done`. Se ele já foi concluído depois do Passo 3, mantenha-o como `done`:
+esta etapa somente amplia sua cobertura contra regressões.
 
 ## 12. Passo 9 — `modeString`
 
