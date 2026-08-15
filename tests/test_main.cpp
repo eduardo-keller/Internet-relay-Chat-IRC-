@@ -1,6 +1,8 @@
 #include <iostream>
 #include <string>
 
+#include "harness.hpp"
+
 // Minimal harness for the inner testing loop. No framework, no dependency:
 // a counter, an assertion, and a summary. Every Phase 1 unit gets its tests
 // added here (or in a sibling tests/*.cpp file, which the Makefile picks up).
@@ -46,9 +48,8 @@ int	main(void)
 {
 	std::cout << "running unit tests" << std::endl;
 
-	// Placeholder so Phase 0 has something green to run. Delete it as soon
-	// as the first real parser test lands.
-	check(true, "harness works");
+	runClientTests();
+	runUtilsTests();
 
 	std::cout << std::endl
 		<< g_passed << " passed, " << g_failed << " failed" << std::endl;

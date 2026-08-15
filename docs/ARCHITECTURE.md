@@ -142,6 +142,11 @@ So: the `Client&` **remains valid** after `disconnectClient` returns. The
 handler should return promptly, and **the dispatch loop must stop extracting
 lines from a client once `isDisconnecting()` is true.**
 
+`disconnectClient` must itself **return immediately when the client is already
+marked**: it queues `ERROR :<reason>`, so on a client whose output queue is
+already full that queueing fails, routes straight back into `disconnectClient`,
+and recurses until the stack is gone.
+
 That is the whole surface. Every method on it is a coupling point between the
 two of us — adding one is a conversation, not a commit.
 
@@ -190,6 +195,27 @@ Malformed input yields an empty `command`: ignore the line, do not reply.
 Nicknames and channel names are case-insensitive, and `{}|^` are the lowercase
 forms of `[]\~`. Plain `std::tolower` is **wrong** here — use
 `utils::toIrcLower`.
+
+### Name validation
+
+`utils::isValidNickname` follows RFC 2812 §2.3.1: the first character is a
+letter or one of the specials ``[ \ ] ^ _ ` { | }``, and later characters may
+also be digits or `-`. Note that `~` is **not** in that special set, so it never
+appears in a legal nickname.
+
+Two decisions, taken in Phase 1 and binding on both tracks:
+
+- **Nicknames are capped at 30, not the RFC's 9.** The RFC's figure is from
+  1988; every deployed server raised it, and irssi fills the nickname from the
+  system username, so a 9-character cap turns away real logins before the user
+  types anything. Channel names keep the RFC's own 50. Both constants live in
+  `Limits.hpp` — see section 11.
+- **`#` is the only channel prefix.** RFC 2812 also lists `&`, `+` and `!`. `+`
+  means "supports no modes", which contradicts the `MODE` work the subject
+  requires, and `!` needs generated channel IDs. `&` means *server-local* — and
+  since the subject forbids server-to-server links, every channel here is
+  already server-local, so `&` would be a second prefix with identical
+  behaviour. `&foo` fails validation and the caller answers `403`.
 
 ---
 
@@ -406,6 +432,8 @@ Constants live in `include/Limits.hpp`.
 | `MAX_READ_BUFFER` | 4096 | `Client::appendToReadBuffer` |
 | `MAX_OUTPUT_QUEUE` | 65536 | `Client::queueOutput` |
 | `RECV_CHUNK` | 4096 | the poll loop |
+| `MAX_NICKNAME_LEN` | 30 | `utils::isValidNickname` — see section 5 |
+| `MAX_CHANNEL_LEN` | 50 | `utils::isValidChannelName`, RFC 2812 §1.3 |
 
 ### Policies
 
