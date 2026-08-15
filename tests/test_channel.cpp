@@ -220,6 +220,37 @@ static void	testInvites(void)
 		"channel invites: removing NULL is safe");
 }
 
+static void	testIndependentClientRoles(void)
+{
+	Channel	channel("#chat");
+	Client	alice(3, "localhost");
+
+	channel.addInvite(&alice);
+	channel.addOperator(&alice);
+	check(!channel.isMember(&alice) && channel.isOperator(&alice)
+		&& channel.isInvited(&alice),
+		"channel roles: invite and operator do not imply membership");
+
+	channel.addMember(&alice);
+	check(channel.isMember(&alice) && channel.isOperator(&alice)
+		&& channel.isInvited(&alice),
+		"channel roles: joining does not consume the invite implicitly");
+
+	channel.removeMember(&alice);
+	check(!channel.isMember(&alice) && channel.isOperator(&alice)
+		&& channel.isInvited(&alice),
+		"channel roles: removing a member leaves explicit cleanup to handlers");
+
+	channel.removeOperator(&alice);
+	check(!channel.isOperator(&alice) && channel.isInvited(&alice),
+		"channel roles: removing an operator does not consume an invite");
+
+	channel.removeInvite(&alice);
+	check(!channel.isMember(&alice) && !channel.isOperator(&alice)
+		&& !channel.isInvited(&alice) && channel.isEmpty(),
+		"channel roles: explicit cleanup removes every independent role");
+}
+
 static void	testBooleanModes(void)
 {
 	Channel	channel("#chat");
@@ -534,6 +565,7 @@ void	runChannelTests(void)
 	testMembers();
 	testOperators();
 	testInvites();
+	testIndependentClientRoles();
 	testBooleanModes();
 	testKeyMode();
 	testUserLimitMode();
