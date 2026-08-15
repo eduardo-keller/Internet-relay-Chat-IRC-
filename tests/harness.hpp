@@ -20,5 +20,6 @@ void	runClientTests(void);
 void	runUtilsTests(void);
 void	runMessageTests(void);
 void	runRepliesTests(void);
+void	runChannelTests(void);
 
 #endif

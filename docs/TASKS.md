@@ -56,9 +56,9 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `Client` — buffer de saída (`queueOutput`/`consumeOutput`) | TRANSPORT | done |
 | `Client` — teto da fila de saída (`MAX_OUTPUT_QUEUE`, SendQ) | TRANSPORT | done |
 | `Client` — `isDisconnecting` / `markDisconnecting` | TRANSPORT | done |
-| `Channel` — OCF, nome, tópico | DOMAIN | todo |
-| `Channel` — membros (`add`/`remove`/`isMember`) | DOMAIN | todo |
-| `Channel` — operadores | DOMAIN | todo |
+| `Channel` — OCF, nome, tópico | DOMAIN | doing |
+| `Channel` — membros (`add`/`remove`/`isMember`) | DOMAIN | done |
+| `Channel` — operadores | DOMAIN | done |
 | `Channel` — lista de convites (guarda `Client*`, não nick) | DOMAIN | todo |
 | `Channel` — modos `i` e `t` | DOMAIN | todo |
 | `Channel` — modo `k` (key) | DOMAIN | todo |
