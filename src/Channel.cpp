@@ -143,6 +143,26 @@ bool	Channel::isOperator(const Client *client) const
 	return (_operators.find(const_cast<Client *>(client)) != _operators.end());
 }
 
+void	Channel::addInvite(Client *client)
+{
+	if (client != NULL)
+		_invited.insert(client);
+}
+
+void	Channel::removeInvite(Client *client)
+{
+	if (client != NULL)
+		_invited.erase(client);
+}
+
+bool	Channel::isInvited(const Client *client) const
+{
+	if (client == NULL)
+		return (false);
+	// As in isMember, const is removed only to match the set's key type.
+	return (_invited.find(const_cast<Client *>(client)) != _invited.end());
+}
+
 bool	Channel::isInviteOnly() const
 {
 	return (_inviteOnly);

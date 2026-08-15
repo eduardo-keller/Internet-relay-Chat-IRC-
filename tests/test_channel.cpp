@@ -154,6 +154,70 @@ static void	testOperators(void)
 		"channel operators: removing NULL is safe");
 }
 
+static void	testInvites(void)
+{
+	Channel	channel("#chat");
+	Client	alice(3, "localhost");
+	Client	bob(4, "localhost");
+	Client	outsider(5, "localhost");
+
+	bob.setNickname("bob");
+	check(!channel.isInvited(&bob),
+		"channel invites: a fresh client is not invited");
+
+	channel.addInvite(&bob);
+	check(channel.isInvited(&bob),
+		"channel invites: an invited client is recorded");
+
+	channel.addInvite(&bob);
+	channel.removeInvite(&bob);
+	check(!channel.isInvited(&bob),
+		"channel invites: adding twice still needs only one removal");
+
+	channel.addInvite(&alice);
+	channel.addInvite(&bob);
+	check(channel.isInvited(&alice) && channel.isInvited(&bob),
+		"channel invites: two invitations can coexist");
+
+	bob.setNickname("renamed-bob");
+	check(channel.isInvited(&bob),
+		"channel invites: an invitation survives a nickname change");
+
+	channel.removeInvite(&bob);
+	check(!channel.isInvited(&bob) && channel.isInvited(&alice),
+		"channel invites: removing one invitation keeps the other");
+
+	channel.removeInvite(&outsider);
+	check(channel.isInvited(&alice),
+		"channel invites: removing a missing invitation is safe");
+
+	Channel	copied(channel);
+
+	check(copied.isInvited(&alice),
+		"channel invites: copy construction preserves invitations");
+	copied.removeInvite(&alice);
+	check(channel.isInvited(&alice),
+		"channel invites: copied invitation set is independent");
+
+	Channel	assigned("#other");
+
+	assigned.addInvite(&outsider);
+	assigned = channel;
+	check(assigned.isInvited(&alice) && !assigned.isInvited(&outsider),
+		"channel invites: assignment replaces the invitation set");
+
+	channel.removeInvite(&alice);
+	check(!channel.isInvited(&alice),
+		"channel invites: a successful removal consumes the invitation");
+
+	channel.addInvite(NULL);
+	check(!channel.isInvited(NULL),
+		"channel invites: NULL is never stored as invited");
+	channel.removeInvite(NULL);
+	check(!channel.isInvited(NULL),
+		"channel invites: removing NULL is safe");
+}
+
 static void	testOrthodoxCanonicalForm(void)
 {
 	Client	alice(3, "localhost");
@@ -235,5 +299,6 @@ void	runChannelTests(void)
 	testInitialState();
 	testMembers();
 	testOperators();
+	testInvites();
 	testOrthodoxCanonicalForm();
 }

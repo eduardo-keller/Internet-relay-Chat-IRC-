@@ -59,7 +59,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `Channel` — OCF, nome, tópico | DOMAIN | done |
 | `Channel` — membros (`add`/`remove`/`isMember`) | DOMAIN | done |
 | `Channel` — operadores | DOMAIN | done |
-| `Channel` — lista de convites (guarda `Client*`, não nick) | DOMAIN | todo |
+| `Channel` — lista de convites (guarda `Client*`, não nick) | DOMAIN | done |
 | `Channel` — modos `i` e `t` | DOMAIN | todo |
 | `Channel` — modo `k` (key) | DOMAIN | todo |
 | `Channel` — modo `l` (limit) | DOMAIN | todo |
