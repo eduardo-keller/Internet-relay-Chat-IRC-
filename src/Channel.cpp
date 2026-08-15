@@ -33,6 +33,9 @@ Channel::Channel(const std::string &name) :
 {
 }
 
+// The sets themselves are copied, so later insertions and removals in one
+// Channel do not affect the other. Their Client* values still point to the
+// same Server-owned clients: copying a Channel never clones a Client.
 Channel::Channel(const Channel &other) :
 	_name(other._name),
 	_topic(other._topic),
@@ -48,6 +51,8 @@ Channel::Channel(const Channel &other) :
 {
 }
 
+// Same ownership rule as the copy constructor. Assignment replaces each set
+// with a separate copy of the container while preserving pointer identity.
 Channel	&Channel::operator=(const Channel &other)
 {
 	if (this != &other)
@@ -67,6 +72,8 @@ Channel	&Channel::operator=(const Channel &other)
 	return (*this);
 }
 
+// Nothing is deleted here. Server owns every Client; these sets only hold
+// non-owning pointers and release their pointer values automatically.
 Channel::~Channel()
 {
 }
@@ -86,6 +93,9 @@ void	Channel::setTopic(const std::string &topic)
 	_topic = topic;
 }
 
+// Membership is based on Client pointer identity, not nickname. std::set
+// makes repeated additions idempotent, and rejecting NULL keeps later
+// broadcasts from ever encountering an invalid member entry.
 void	Channel::addMember(Client *client)
 {
 	if (client != NULL)
@@ -123,6 +133,9 @@ const std::set<Client *>	&Channel::getMembers() const
 	return (_members);
 }
 
+// Operator state is deliberately separate from membership. JOIN, MODE, PART
+// and KICK handlers decide when to call both APIs; Channel only stores the
+// state it is given. std::set prevents duplicate promotions.
 void	Channel::addOperator(Client *client)
 {
 	if (client != NULL)
@@ -143,6 +156,9 @@ bool	Channel::isOperator(const Client *client) const
 	return (_operators.find(const_cast<Client *>(client)) != _operators.end());
 }
 
+// Invites store Client* rather than nicknames, so an invitation survives a
+// /nick change. A successful future cmdJoin consumes it explicitly through
+// removeInvite; merely adding a member does not silently change this set.
 void	Channel::addInvite(Client *client)
 {
 	if (client != NULL)
