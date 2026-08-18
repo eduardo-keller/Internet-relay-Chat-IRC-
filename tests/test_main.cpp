@@ -49,6 +49,7 @@ int	main(void)
 	std::cout << "running unit tests" << std::endl;
 
 	runClientTests();
+	runServerTests();
 	runUtilsTests();
 	runMessageTests();
 	runRepliesTests();

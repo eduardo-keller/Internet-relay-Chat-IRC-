@@ -206,6 +206,8 @@ void	Server::run()
 			// first would throw away a QUIT we were supposed to see.
 			if (re & POLLIN)
 				handleReadable(fd);
+			if (re & POLLOUT)
+				handleWritable(fd);
 			if (re & (POLLERR | POLLHUP | POLLNVAL))
 			{
 				// POLLNVAL means the fd in OUR array is not open — a bookkeeping
@@ -216,8 +218,6 @@ void	Server::run()
 				if (client != NULL)
 					disconnectClient(*client, "Connection closed by peer");
 			}
-			// POLLOUT joins here in step 4, once sendToClient exists and
-			// buildPollFds has something to arm the flag for.
 		}
 
 		// The ONE place a Client is deleted, and it runs after every event of
@@ -248,11 +248,14 @@ void	Server::buildPollFds()
 		it != _clients.end(); ++it)
 	{
 		pfd.fd = it->first;
-		// POLLOUT is deliberately absent. A socket with room in its send
-		// buffer is ALWAYS writable, so arming it unconditionally makes
-		// poll() return immediately every single iteration and the loop spins
-		// at 100% CPU. Step 4 arms it only when hasPendingOutput() is true.
 		pfd.events = POLLIN;
+		// POLLOUT ONLY WHEN THERE IS SOMETHING TO WRITE. A socket with room in
+		// its send buffer is always writable, so arming it unconditionally
+		// makes poll() return immediately every single iteration and the loop
+		// spins at 100% CPU with nothing to do — the most common way this
+		// design goes wrong, and the first thing an evaluator measures.
+		if (it->second->hasPendingOutput())
+			pfd.events |= POLLOUT;
 		pfd.revents = 0;
 		_pollFds.push_back(pfd);
 	}
@@ -387,14 +390,75 @@ void	Server::handleReadable(int fd)
 // table lookup, 421, the registration gate). It exists now only so that the
 // reassembly above is observable before any command handler exists.
 //
-// It logs rather than echoing back to the socket: writing there means
-// sendToClient and POLLOUT, which are step 4. Every outbound byte in this
-// server goes through that one choke point, and opening a second path just to
-// see an echo early would be a rule to remember to undo later.
+// The echo goes out through sendToClient, like every other byte this server
+// emits, so it is truncated and CRLF-terminated by the same code the real
+// replies will use. The log line stays because tests/it/read_path.sh asserts
+// on it.
 void	Server::handleLine(Client &client, const std::string &line)
 {
 	std::cout << "ircserv: line from " << client.getHostname() << " ["
 		<< line << "] (" << line.size() << " bytes)" << std::endl;
+	sendToClient(client, line);
+}
+
+// --- the write path -------------------------------------------------------
+
+// THE SINGLE CHOKE POINT for every byte this server emits, which is what makes
+// one truncation here enough for every command.
+//
+// The order matters: truncate to 510 FIRST, then append CRLF, giving 512 on
+// the wire — the RFC 2812 section 2.3 limit, CRLF included. Truncating after
+// would cut the "\r\n" off a maximum-length line and glue two messages
+// together in the client's parser.
+//
+// Checking only the INCOMING length would miss this entirely. A client sends
+// "PRIVMSG #chan :<504 bytes>", perfectly legal at under 512; the server
+// relays it as ":nick!user@host PRIVMSG #chan :<504 bytes>" and the prefix it
+// just added pushes the result past the limit.
+void	Server::sendToClient(Client &client, const std::string &line)
+{
+	std::string	payload(line);
+
+	if (payload.size() > irc::MAX_PAYLOAD_LEN)
+		payload.resize(irc::MAX_PAYLOAD_LEN);
+	payload += "\r\n";
+
+	// queueOutput refuses when the queue passed MAX_OUTPUT_QUEUE: the client
+	// stopped reading (suspended with Ctrl+Z, or hostile) while traffic kept
+	// arriving. Other servers call this SendQ exceeded. Note that this is the
+	// call that can re-enter disconnectClient — see the guard there.
+	if (!client.queueOutput(payload))
+		disconnectClient(client, "SendQ exceeded");
+}
+
+// One send() per readiness event, mirroring the read side. send() reports how
+// many bytes the kernel accepted, which is NOT necessarily all of them, and
+// POLLOUT stays armed while anything remains queued — so the remainder goes
+// out on the next pass with no loop needed here.
+void	Server::handleWritable(int fd)
+{
+	Client	*client = findClientByFd(fd);
+
+	if (client == NULL || !client->hasPendingOutput())
+		return ;
+
+	const std::string	&pending = client->getOutputBuffer();
+	ssize_t				n = send(fd, pending.data(), pending.size(), 0);
+
+	if (n < 0)
+	{
+		// A full kernel send buffer is EAGAIN, and it is the NORMAL case for a
+		// slow client: the data stays queued and POLLOUT fires again when the
+		// window opens. Treating it as an error would disconnect exactly the
+		// clients this buffering exists to serve.
+		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+			return ;
+		// EPIPE lands here rather than killing the process, because SIGPIPE is
+		// ignored at startup.
+		disconnectClient(*client, std::strerror(errno));
+		return ;
+	}
+	client->consumeOutput(static_cast<std::size_t>(n));
 }
 
 // Marks; never deletes. See ARCHITECTURE.md section 4 for why the delete is
@@ -407,9 +471,15 @@ void	Server::disconnectClient(Client &client, const std::string &reason)
 	// the early return that is unbounded recursion until the stack is gone.
 	if (client.isDisconnecting())
 		return ;
+
+	// MARKED BEFORE ANYTHING IS QUEUED. sendToClient below can fail on a full
+	// queue and call straight back into this function; the mark is what makes
+	// that second call return at the line above instead of recursing forever.
 	client.markDisconnecting(reason);
-	// Step 4 queues "ERROR :" + reason here; step 4.5 adds the QUIT broadcast
-	// to the client's peers. Both need machinery that does not exist yet.
+
+	// Step 4.5 adds the QUIT broadcast to the client's peers here, once
+	// channels exist to find those peers in.
+	sendToClient(client, "ERROR :" + reason);
 }
 
 // The single point where a Client is destroyed, called at the END of a poll
@@ -431,11 +501,30 @@ void	Server::reapDisconnected()
 		std::cout << "ircserv: closing fd " << it->first << " ("
 			<< client->getQuitReason() << ")" << std::endl;
 
-		// Step 4 adds the best-effort flush of the output queue here, while
-		// the fd is still open. sweepChannels is a no-op until step 4.5, and
-		// it MUST stay ahead of the delete: Channel holds non-owning Client*,
-		// so a client freed while still listed as a member leaves dangling
-		// pointers in every channel it joined.
+		// BEST-EFFORT FLUSH, while the fd is still open. This is the only
+		// reason the disconnect is deferred rather than immediate: it is what
+		// gets "ERROR :<reason>" — and the 464 before it, and the QUIT echo —
+		// onto the wire at all. Once close() runs, anything still queued is
+		// gone.
+		//
+		// One send, no retry and no waiting for POLLOUT: the client is leaving,
+		// and a peer that has stopped reading must not be able to hold a slot
+		// in the loop by refusing to drain. If the kernel takes only part of
+		// it, the rest is lost, which is the correct trade here.
+		if (client->hasPendingOutput())
+		{
+			const std::string	&pending = client->getOutputBuffer();
+			ssize_t				sent = send(it->first, pending.data(),
+									pending.size(), 0);
+
+			if (sent > 0)
+				client->consumeOutput(static_cast<std::size_t>(sent));
+		}
+
+		// sweepChannels is a no-op until step 4.5, and it MUST stay ahead of
+		// the delete: Channel holds non-owning Client*, so a client freed while
+		// still listed as a member leaves dangling pointers in every channel it
+		// joined.
 		sweepChannels(*client);
 		close(it->first);
 

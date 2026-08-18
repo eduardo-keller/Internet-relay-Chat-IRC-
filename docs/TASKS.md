@@ -77,17 +77,17 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | **Laço de `poll()`** (era sessão conjunta; feito só pelo Eduardo, em 3 fatias — ver `FASE2.md`) | TRANSPORT | done (esqueleto; `POLLOUT` entra no passo 4) |
 | `accept` de novo cliente + entrada no `_pollFds` | TRANSPORT | done |
 | `recv` → `appendToReadBuffer` → drenar linhas | TRANSPORT | done (`tests/it/read_path.sh`) |
-| `send` não bloqueante com `POLLOUT` (armado só se há saída) | TRANSPORT | todo |
-| `sendToClient` trunca em 510 antes do CRLF | TRANSPORT | todo |
+| `send` não bloqueante com `POLLOUT` (armado só se há saída) | TRANSPORT | done |
+| `sendToClient` trunca em 510 antes do CRLF | TRANSPORT | done (`tests/test_server.cpp`) |
 | `broadcastToPeers` — destinatários únicos (NICK/QUIT) | TRANSPORT | todo |
-| `disconnectClient` marca; `reapDisconnected` deleta no fim | TRANSPORT | done (falta só o flush do passo 4 e a varredura de canais do 4.5) |
+| `disconnectClient` marca; `reapDisconnected` deleta no fim | TRANSPORT | done (falta só a varredura de canais do 4.5) |
 | Despacho para de extrair linhas se `isDisconnecting()` | TRANSPORT | done (guarda no laço de drenagem; vira crítico com o `cmdQuit` do passo 7) |
 | `buildCommandTable` + despacho | TRANSPORT | todo |
 | Porta do registro no despacho (`451`) | TRANSPORT | todo |
 | **`signal(SIGPIPE, SIG_IGN)`** — sem isso o processo morre | TRANSPORT | done |
 | `signal` para `SIGINT` (shutdown sem vazar) | TRANSPORT | done |
-| `EAGAIN`/`EWOULDBLOCK` não é erro nem desconexão | TRANSPORT | doing (feito no `accept` e no `recv`; falta o `send`) |
-| `EINTR` repete a chamada | TRANSPORT | doing (feito no `poll` e no `recv`; falta o `send`) |
+| `EAGAIN`/`EWOULDBLOCK` não é erro nem desconexão | TRANSPORT | done (`accept`, `recv` e `send`) |
+| `EINTR` repete a chamada | TRANSPORT | done (`poll`, `recv` e `send`) |
 | `POLLHUP` / `POLLERR` / `POLLNVAL` tratados | TRANSPORT | done |
 | `cmdPass` (+ `462`, `464`) | TRANSPORT | todo |
 | `cmdNick` (+ `431`, `432`, `433`) | TRANSPORT | todo |
@@ -133,7 +133,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | Regressão: linha > 512 truncada (implementado na Fase 1) | BOTH | todo |
 | `PRIVMSG` de 504 bytes + prefixo sai truncado em 510 | BOTH | todo |
 | `QUIT` colado com outra linha no mesmo pacote | BOTH | todo |
-| Cliente que para de ler (`Ctrl+Z` no `nc`) estoura SendQ | BOTH | todo |
+| Cliente que para de ler (`Ctrl+Z` no `nc`) estoura SendQ | BOTH | done no passo 4 (cliente que não lê → `SendQ exceeded`); refazer com `Ctrl+Z` de verdade na Fase 4 |
 | Bytes NUL e lixo binário não derrubam | BOTH | todo |
 | Cliente morto (`kill -9`) sem `QUIT` | BOTH | todo |
 | Muitos clientes simultâneos | BOTH | todo |

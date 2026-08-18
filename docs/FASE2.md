@@ -24,7 +24,7 @@ para ser defendida linha a linha na avaliação.
 | 1 | Socket de escuta, sem `poll()` | `ss -ltn` mostra a porta; SIGINT sai limpo | done |
 | 2 | Esqueleto do `poll()` + `accept` + reap | 3 clientes simultâneos, 0% de CPU ocioso | done |
 | 3 | Caminho de leitura (`recv` → buffer → linhas) | **teste do subject (`com^Dman^Dd`) passa** | done |
-| 4 | Caminho de escrita (`sendToClient` + `POLLOUT`) | truncagem em 510 e SendQ no `make test` | todo |
+| 4 | Caminho de escrita (`sendToClient` + `POLLOUT`) | truncagem em 510 e SendQ no `make test` | done |
 | 4.5 | Gancho de integração: seam de canal real | destrava os handlers do colega | todo |
 | 5 | Despachante (parse, tabela, `421`, `451`) | `FOO` → 421, `JOIN` sem registro → 451 | todo |
 | 6 | `PASS`/`NICK`/`USER` + rajada `001`–`004` | registro ponta a ponta pelo `nc` | todo |
@@ -380,7 +380,7 @@ com^Dman^Dd<Enter>               # o log tem que mostrar UMA linha: [command]
 
 ### Passo 4 — Caminho de escrita: `sendToClient` + `POLLOUT`
 
-**Status:** `todo`
+**Status:** `done` — 2026-08-18
 
 **Escrever:** `sendToClient` (truncar em `irc::MAX_PAYLOAD_LEN`, *depois*
 acrescentar `\r\n`, depois `queueOutput`; `false` → `disconnectClient("SendQ
@@ -407,10 +407,31 @@ check(c.isDisconnecting(),
       "estouro de SendQ marca o cliente, nao deleta");
 ```
 
-- [ ] truncagem em 510 no `make test`
-- [ ] estouro de SendQ marca (e não deleta) no `make test`
-- [ ] eco do passo 3 agora sai por `sendToClient`, com CRLF correto
-- [ ] CPU ociosa ainda em ~0% com cliente conectado e fila vazia
+- [x] truncagem em 510 no `make test` (com as bordas: 510 passa inteiro, 511
+      perde exatamente um byte, e o CRLF nunca é cortado no meio)
+- [x] estouro de SendQ marca (e não deleta) no `make test`
+- [x] eco do passo 3 agora sai por `sendToClient`, com CRLF correto —
+      verificado no fio com `od -c` em `tests/it/write_path.sh`
+- [x] CPU ociosa ainda em ~0% com cliente conectado e fila vazia (0 ticks em
+      3 s — é aqui que um `POLLOUT` armado sem condição apareceria)
+- [x] **SendQ estourando na vida real, não só no teste unitário:** um cliente
+      que manda 4000 linhas e nunca lê levou a `closing fd 4 (SendQ exceeded)`.
+      Isso é a linha "cliente que para de ler (`Ctrl+Z` no `nc`)" da Fase 4 do
+      `TASKS.md`, antecipada de graça
+- [x] valgrind sobre os dois caminhos: 0 vazamentos, 0 erros
+
+**Duas coisas que este passo fechou e que estavam penduradas:**
+
+1. **O flush best-effort no `reapDisconnected`.** É ele que faz a desconexão
+   adiada valer a pena: o `ERROR :<reason>` é enfileirado num cliente **já
+   marcado**, então sem esse `send` antes do `close` a mensagem morreria na
+   fila. É o que o teste 3 do `write_path.sh` prova — o flood recebe o
+   `ERROR :Request too long` que o passo 3 só sabia guardar.
+2. **A recursão do `disconnectClient` deixou de ser teórica.** Agora que ele
+   enfileira de verdade, o caminho `disconnectClient → sendToClient →
+   queueOutput falha → disconnectClient` existe no código, e há um teste
+   unitário cujo *sucesso é chegar na linha seguinte* (recursão infinita
+   derrubaria o binário de teste).
 
 ---
 
