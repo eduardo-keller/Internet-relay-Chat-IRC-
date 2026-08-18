@@ -23,7 +23,7 @@ para ser defendida linha a linha na avaliação.
 | 0 | Decisões e reserva de nomes | `TASKS.md` atualizado, colega avisado | done |
 | 1 | Socket de escuta, sem `poll()` | `ss -ltn` mostra a porta; SIGINT sai limpo | done |
 | 2 | Esqueleto do `poll()` + `accept` + reap | 3 clientes simultâneos, 0% de CPU ocioso | done |
-| 3 | Caminho de leitura (`recv` → buffer → linhas) | **teste do subject (`com^Dman^Dd`) passa** | todo |
+| 3 | Caminho de leitura (`recv` → buffer → linhas) | **teste do subject (`com^Dman^Dd`) passa** | done |
 | 4 | Caminho de escrita (`sendToClient` + `POLLOUT`) | truncagem em 510 e SendQ no `make test` | todo |
 | 4.5 | Gancho de integração: seam de canal real | destrava os handlers do colega | todo |
 | 5 | Despachante (parse, tabela, `421`, `451`) | `FOO` → 421, `JOIN` sem registro → 451 | todo |
@@ -321,7 +321,7 @@ SendQ cheia.
 
 ### Passo 3 — Caminho de leitura: `recv` → `appendToReadBuffer` → drenar linhas
 
-**Status:** `todo`
+**Status:** `done` — 2026-08-18
 
 **Escrever:** o resto do `handleReadable(fd)`. Os quatro primeiros itens
 abaixo **já entraram no passo 2** (ver a nota lá sobre o porquê) e ficam aqui só
@@ -338,27 +338,43 @@ como referência do contrato completo da função:
   `disconnectClient`.
 - Drenar com `while (!client.isDisconnecting() && client.extractCommand(line))`.
 
-`handleLine` é um **eco temporário só neste passo**, para a drenagem ficar
-observável antes de o despachante existir.
+`handleLine` é **temporário só neste passo**, para a drenagem ficar observável
+antes de o despachante existir. **Ele loga no `stdout` do servidor em vez de
+ecoar pelo socket:** escrever para o cliente exige `sendToClient` + `POLLOUT`,
+que são o passo 4, e abrir um `send()` cru aqui furaria o choke point único do
+`ARCHITECTURE.md` §11 — a regra que faz a truncagem em 510 valer para todo byte
+que sai. O eco pelo socket é o primeiro checkbox do passo 4.
 
-**Testes — é aqui que o teste avaliado passa.** Versão roteirizada, sem depender
-das variações de `nc`:
+**Testes — é aqui que o teste avaliado passa.** Versionados em
+`tests/it/read_path.sh` (decisão D6), fora do build avaliado porque precisam de
+socket de verdade. Rodar com o servidor parado, que o script sobe o dele:
 
 ```sh
-exec 3<>/dev/tcp/127.0.0.1/6667
-printf 'com' >&3; sleep 0.3; printf 'man' >&3; sleep 0.3; printf 'd\r\n' >&3
-timeout 2 cat <&3          # exatamente uma linha: "command"
+./tests/it/read_path.sh          # usa a porta 6690; passe outra como argumento
 ```
 
-E, na mão, o teste literal do subject (`nc -C 127.0.0.1 6667`, `com^Dman^Dd`) —
-é o que o avaliador digita.
+O script afirma sobre o **log do servidor**, não sobre o que volta pelo socket:
+até o passo 4 o servidor não tem como responder. Ele manda os três fragmentos
+em pacotes separados, que é exatamente o que o Ctrl+D produz — a única coisa
+que ele não consegue reproduzir é o Ctrl+D em si, que é ação de terminal e não
+byte. Por isso o teste literal do subject continua sendo **feito na mão**:
 
-- [ ] pacote parcial roteirizado vira um comando só
-- [ ] `nc -C` com Ctrl+D na mão vira um comando só
-- [ ] dois comandos num `printf` só viram dois comandos
-- [ ] 600 bytes + CRLF viram uma linha de 510
-- [ ] 5000 bytes sem `\n` → `ERROR :Request too long` e fecha
-- [ ] `\n` sozinho (sem `\r`) funciona igual
+```sh
+nc -C 127.0.0.1 6667
+com^Dman^Dd<Enter>               # o log tem que mostrar UMA linha: [command]
+```
+
+- [x] pacote parcial roteirizado vira um comando só
+- [ ] `nc -C` com Ctrl+D **na mão** — único que não dá para roteirizar, fazer
+      antes da avaliação
+- [x] dois comandos num `printf` só viram dois comandos
+- [x] 600 bytes + CRLF viram uma linha de 510
+- [x] 5000 bytes sem `\n` → desconecta com `Request too long` (o texto vai para
+      o fio como `ERROR :Request too long` no passo 4, quando houver como
+      escrever; a razão já está guardada no `Client`)
+- [x] `\n` sozinho (sem `\r`) funciona igual
+- [x] valgrind sobre todo esse tráfego: 0 vazamentos, 0 erros
+- [x] CPU ociosa em 0 ticks depois de todo o tráfego
 
 ---
 

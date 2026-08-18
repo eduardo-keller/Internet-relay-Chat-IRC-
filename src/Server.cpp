@@ -312,15 +312,18 @@ Client	*Server::findClientByFd(int fd)
 	return (it->second);
 }
 
-// STEP 2 VERSION: the syscall and its error taxonomy, with the payload thrown
-// away. Step 3 replaces the discard with appendToReadBuffer() plus the drain
-// loop; nothing above that line changes.
+// The read path: ONE recv() per readiness event, into the client's buffer, then
+// drain every complete line the buffer now holds.
 //
-// The recv() cannot wait for step 3. On Linux a peer closing normally shows up
-// as POLLIN with recv() returning 0 — NOT as POLLHUP, which is only reported
-// once both directions are shut down. So without this call a client that
-// simply quits is never noticed: its POLLIN stays raised, poll() returns
-// instantly forever, and the loop burns 100% CPU on a socket nobody reads.
+// The single recv() is not a shortcut. poll() is level-triggered, so bytes left
+// in the kernel are reported again on the very next pass: nothing is lost and
+// nothing stalls. Looping until EAGAIN is mandatory only for edge-triggered
+// epoll, and here it would let one flooding client monopolise the loop.
+// ARCHITECTURE.md section 11 has the long version.
+//
+// recv() returning 0 is also the ONLY reliable sign that a peer closed: on
+// Linux that surfaces as POLLIN, not POLLHUP, which is reported only once both
+// directions are shut down.
 void	Server::handleReadable(int fd)
 {
 	Client	*client = findClientByFd(fd);
@@ -352,11 +355,46 @@ void	Server::handleReadable(int fd)
 		return ;
 	}
 
-	// STEP 3 GOES HERE: if (!client->appendToReadBuffer(std::string(buf, n)))
-	// -> "ERROR :Request too long" + disconnect; then drain complete lines
-	// with extractCommand while !isDisconnecting().
-	std::cout << "ircserv: fd " << fd << " sent " << n
-		<< " bytes (discarded until step 3)" << std::endl;
+	// THE TWO-ARGUMENT std::string CONSTRUCTOR, always. std::string(buf) would
+	// stop at the first NUL byte and silently drop the rest of the packet —
+	// and recv() gives no terminator, so the one-argument form would also read
+	// past n into uninitialised stack memory.
+	if (!client->appendToReadBuffer(std::string(buf, static_cast<std::size_t>(n))))
+	{
+		// The buffer passed MAX_READ_BUFFER with no complete line in it: one
+		// unterminated flood, not legitimate pipelining. The reason string is
+		// what step 4 will put on the wire as "ERROR :Request too long".
+		disconnectClient(*client, "Request too long");
+		return ;
+	}
+
+	// One packet can carry several commands, or half of one. This is where
+	// that stops mattering: extractCommand pops exactly one complete line per
+	// call and leaves any partial remainder in the buffer for the next recv.
+	//
+	// isDisconnecting() IS CHECKED FIRST, EVERY TIME. From step 5 on, a line
+	// can be a QUIT, and "QUIT :bye\r\nPRIVMSG #c :x\r\n" arrives in a single
+	// packet all the time. Without this guard the loop would keep feeding
+	// lines to a client already marked for death — the use-after-free the
+	// deferred disconnect exists to prevent.
+	std::string	line;
+
+	while (!client->isDisconnecting() && client->extractCommand(line))
+		handleLine(*client, line);
+}
+
+// TEMPORARY — step 5 replaces this body with the real dispatcher (parse,
+// table lookup, 421, the registration gate). It exists now only so that the
+// reassembly above is observable before any command handler exists.
+//
+// It logs rather than echoing back to the socket: writing there means
+// sendToClient and POLLOUT, which are step 4. Every outbound byte in this
+// server goes through that one choke point, and opening a second path just to
+// see an echo early would be a rule to remember to undo later.
+void	Server::handleLine(Client &client, const std::string &line)
+{
+	std::cout << "ircserv: line from " << client.getHostname() << " ["
+		<< line << "] (" << line.size() << " bytes)" << std::endl;
 }
 
 // Marks; never deletes. See ARCHITECTURE.md section 4 for why the delete is
