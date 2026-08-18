@@ -100,7 +100,14 @@ class Server
 		// Called by run() before any socket exists.
 		void	installSignalHandlers();
 		void	setupListenSocket();
+		// Rebuilds _pollFds from _listenFd + _clients, from scratch, once per
+		// iteration. Rebuilding rather than mutating is what makes index
+		// shifts and stale entries impossible; see src/Server.cpp.
+		void	buildPollFds();
 		void	acceptNewClient();
+		// NULL when no client owns that fd. _clients is keyed by fd, so this
+		// is a map lookup, not a scan.
+		Client	*findClientByFd(int fd);
 		void	handleReadable(int fd);
 		void	handleWritable(int fd);
 		void	handleLine(Client &client, const std::string &line);

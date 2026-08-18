@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include "Client.hpp"
+#include "Limits.hpp"
 #include "Server.hpp"
 
 // The transport half of the server. See include/Server.hpp for the seam the
@@ -148,11 +149,12 @@ void	Server::setupListenSocket()
 		throw std::runtime_error(std::string("listen: ") + std::strerror(errno));
 }
 
-// --- the loop -------------------------------------------------------------
+// --- the poll loop --------------------------------------------------------
 //
-// STEP 1 SHAPE ONLY. It sets the socket up and stays alive long enough to be
-// observed with ss(8) and interrupted with Ctrl+C. Step 2 replaces the body
-// with the real loop: _pollFds rebuilt from _clients, accept, and the reap.
+// ONE poll() for every fd in the process, the listening socket included. That
+// is not a style choice: the subject makes reading or writing any fd outside
+// poll() an automatic zero.
+
 void	Server::run()
 {
 	installSignalHandlers();
@@ -162,31 +164,250 @@ void	Server::run()
 
 	while (_running && !g_shutdown)
 	{
-		struct pollfd	pfd;
+		buildPollFds();
 
-		pfd.fd = _listenFd;
-		pfd.events = POLLIN;
-		pfd.revents = 0;
-		if (poll(&pfd, 1, -1) < 0)
+		// Timeout -1 blocks until something actually happens. There is no
+		// periodic work in this server, so any finite timeout would only mean
+		// waking up to do nothing. This is what keeps an idle process — even
+		// one holding fifty connections — at 0.0% CPU.
+		int	ready = poll(&_pollFds[0], _pollFds.size(), -1);
+
+		if (ready < 0)
 		{
-			// SIGINT lands here: the signal interrupts poll(), which returns
-			// -1 with EINTR. That is not a failure, so retry — and the loop
-			// condition then sees the flag and leaves on its own terms.
+			// A signal interrupted the wait. Not a failure: go round again and
+			// let the loop condition notice g_shutdown on its own terms, so
+			// that ~Server still runs.
 			if (errno == EINTR)
-				continue;
+				continue ;
 			throw std::runtime_error(std::string("poll: ")
 				+ std::strerror(errno));
 		}
-		if (pfd.revents & POLLIN)
+
+		// _pollFds is NOT touched inside this loop — acceptNewClient does not
+		// push into it, and nothing is deleted before reapDisconnected. Both
+		// facts are what make plain indexing safe here.
+		for (std::size_t i = 0; i < _pollFds.size(); ++i)
 		{
-			// accept() arrives in step 2. Leaving rather than looping is
-			// deliberate: poll() is level-triggered, so a connection nobody
-			// accepts is re-reported immediately, forever, and this loop
-			// would spin at 100% CPU.
-			std::cout << "ircserv: connection pending, accept() is step 2"
-				<< std::endl;
-			break;
+			short	re = _pollFds[i].revents;
+			int		fd = _pollFds[i].fd;
+
+			if (re == 0)
+				continue ;
+			if (fd == _listenFd)
+			{
+				if (re & POLLIN)
+					acceptNewClient();
+				continue ;
+			}
+
+			// POLLIN IS HANDLED BEFORE THE ERROR FLAGS, on purpose. A peer that
+			// sent FIN is half closed, not gone: bytes it wrote before closing
+			// are still sitting in our kernel buffer, and acting on the hangup
+			// first would throw away a QUIT we were supposed to see.
+			if (re & POLLIN)
+				handleReadable(fd);
+			if (re & (POLLERR | POLLHUP | POLLNVAL))
+			{
+				// POLLNVAL means the fd in OUR array is not open — a bookkeeping
+				// bug on our side. Dropping the client is still the right move:
+				// left in place, poll() would report it every iteration forever.
+				Client	*client = findClientByFd(fd);
+
+				if (client != NULL)
+					disconnectClient(*client, "Connection closed by peer");
+			}
+			// POLLOUT joins here in step 4, once sendToClient exists and
+			// buildPollFds has something to arm the flag for.
 		}
+
+		// The ONE place a Client is deleted, and it runs after every event of
+		// this iteration has been handled — so no code above is still holding a
+		// reference to what is about to be freed.
+		reapDisconnected();
 	}
 	std::cout << "ircserv: shutting down" << std::endl;
+}
+
+// Rebuilt from scratch every iteration rather than kept in sync incrementally.
+//
+// The incremental version has to match every insertion and erase against the
+// indices the event loop is currently holding; one missed shift and the loop
+// reads another client's revents, or worse, a closed fd's. Rebuilding makes
+// that class of bug unreachable by construction. The cost is O(n) over a
+// handful of fds per wait — invisible next to the syscall it precedes.
+void	Server::buildPollFds()
+{
+	struct pollfd	pfd;
+
+	_pollFds.clear();
+	pfd.fd = _listenFd;
+	pfd.events = POLLIN;
+	pfd.revents = 0;
+	_pollFds.push_back(pfd);
+	for (std::map<int, Client *>::const_iterator it = _clients.begin();
+		it != _clients.end(); ++it)
+	{
+		pfd.fd = it->first;
+		// POLLOUT is deliberately absent. A socket with room in its send
+		// buffer is ALWAYS writable, so arming it unconditionally makes
+		// poll() return immediately every single iteration and the loop spins
+		// at 100% CPU. Step 4 arms it only when hasPendingOutput() is true.
+		pfd.events = POLLIN;
+		pfd.revents = 0;
+		_pollFds.push_back(pfd);
+	}
+}
+
+// One accept() per readiness event, per the one-syscall-per-event rule in
+// ARCHITECTURE.md section 11: poll() is level-triggered, so a second connection
+// waiting in the backlog is simply reported again on the next pass. Nothing is
+// lost and no client can starve the others by connecting in a tight loop.
+void	Server::acceptNewClient()
+{
+	struct sockaddr_in	addr;
+	socklen_t			addrLen = sizeof(addr);
+
+	std::memset(&addr, 0, sizeof(addr));
+
+	int	fd = accept(_listenFd, reinterpret_cast<struct sockaddr *>(&addr),
+			&addrLen);
+
+	if (fd < 0)
+	{
+		// POLLIN said a connection WAS pending. Between that and this call the
+		// peer can have sent RST and disappeared, which leaves accept() with
+		// EAGAIN. That is an ordinary event, not a failure — and it is exactly
+		// why the listening socket itself is non-blocking: a blocking accept()
+		// here would park the whole server on a client that no longer exists.
+		return ;
+	}
+
+	// EVERY accepted fd is made non-blocking. Inheriting O_NONBLOCK from the
+	// listening socket is NOT portable — Linux does not do it — so a missing
+	// fcntl here means one slow client can block send() and freeze everyone.
+	if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0)
+	{
+		close(fd);
+		return ;
+	}
+
+	char		host[INET_ADDRSTRLEN];
+	const char	*text = inet_ntop(AF_INET, &addr.sin_addr, host, sizeof(host));
+	std::string	hostname(text != NULL ? text : "unknown");
+
+	// The dotted-quad address is used as the hostname, with no reverse DNS.
+	// Resolving would need a blocking lookup inside the event loop, freezing
+	// every other client for the length of a DNS timeout.
+	_clients[fd] = new Client(fd, hostname);
+	std::cout << "ircserv: accepted fd " << fd << " from " << hostname
+		<< std::endl;
+}
+
+Client	*Server::findClientByFd(int fd)
+{
+	std::map<int, Client *>::iterator	it = _clients.find(fd);
+
+	if (it == _clients.end())
+		return (NULL);
+	return (it->second);
+}
+
+// STEP 2 VERSION: the syscall and its error taxonomy, with the payload thrown
+// away. Step 3 replaces the discard with appendToReadBuffer() plus the drain
+// loop; nothing above that line changes.
+//
+// The recv() cannot wait for step 3. On Linux a peer closing normally shows up
+// as POLLIN with recv() returning 0 — NOT as POLLHUP, which is only reported
+// once both directions are shut down. So without this call a client that
+// simply quits is never noticed: its POLLIN stays raised, poll() returns
+// instantly forever, and the loop burns 100% CPU on a socket nobody reads.
+void	Server::handleReadable(int fd)
+{
+	Client	*client = findClientByFd(fd);
+
+	if (client == NULL || client->isDisconnecting())
+		return ;
+
+	char	buf[irc::RECV_CHUNK];
+	ssize_t	n = recv(fd, buf, sizeof(buf), 0);
+
+	if (n == 0)
+	{
+		// End of stream: the peer called close() or shutdown(). This is the
+		// ONLY reliable indication of an orderly disconnect.
+		disconnectClient(*client, "Client closed connection");
+		return ;
+	}
+	if (n < 0)
+	{
+		// EAGAIN/EWOULDBLOCK on a non-blocking fd means "nothing right now" —
+		// neither an error nor a disconnect. Treating it as failure is the
+		// classic non-blocking bug, and it is reachable here even with
+		// level-triggered poll(): a checksum-failed segment can raise POLLIN
+		// and then be discarded before we read. EINTR is a signal landing
+		// mid-call; the next poll() will tell us again.
+		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+			return ;
+		disconnectClient(*client, std::strerror(errno));
+		return ;
+	}
+
+	// STEP 3 GOES HERE: if (!client->appendToReadBuffer(std::string(buf, n)))
+	// -> "ERROR :Request too long" + disconnect; then drain complete lines
+	// with extractCommand while !isDisconnecting().
+	std::cout << "ircserv: fd " << fd << " sent " << n
+		<< " bytes (discarded until step 3)" << std::endl;
+}
+
+// Marks; never deletes. See ARCHITECTURE.md section 4 for why the delete is
+// deferred to reapDisconnected.
+void	Server::disconnectClient(Client &client, const std::string &reason)
+{
+	// This guard is not an optimisation. From step 4 on, this function queues
+	// "ERROR :<reason>", and queueing fails on a client whose SendQ is already
+	// full — whose failure path is another call to disconnectClient. Without
+	// the early return that is unbounded recursion until the stack is gone.
+	if (client.isDisconnecting())
+		return ;
+	client.markDisconnecting(reason);
+	// Step 4 queues "ERROR :" + reason here; step 4.5 adds the QUIT broadcast
+	// to the client's peers. Both need machinery that does not exist yet.
+}
+
+// The single point where a Client is destroyed, called at the END of a poll
+// iteration and nowhere else.
+void	Server::reapDisconnected()
+{
+	std::map<int, Client *>::iterator	it = _clients.begin();
+
+	while (it != _clients.end())
+	{
+		if (!it->second->isDisconnecting())
+		{
+			++it;
+			continue ;
+		}
+
+		Client	*client = it->second;
+
+		std::cout << "ircserv: closing fd " << it->first << " ("
+			<< client->getQuitReason() << ")" << std::endl;
+
+		// Step 4 adds the best-effort flush of the output queue here, while
+		// the fd is still open. sweepChannels is a no-op until step 4.5, and
+		// it MUST stay ahead of the delete: Channel holds non-owning Client*,
+		// so a client freed while still listed as a member leaves dangling
+		// pointers in every channel it joined.
+		sweepChannels(*client);
+		close(it->first);
+
+		// std::map::erase invalidates only the erased iterator, and in C++98
+		// it returns void — hence copy, advance, then erase the copy. Erasing
+		// first and advancing afterwards would advance a dead iterator.
+		std::map<int, Client *>::iterator	dead = it;
+
+		++it;
+		_clients.erase(dead);
+		delete client;
+	}
 }

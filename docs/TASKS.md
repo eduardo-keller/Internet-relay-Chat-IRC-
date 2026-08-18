@@ -73,22 +73,22 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | Item | Dono | Status |
 |---|---|---|
 | `socket` / `setsockopt` / `bind` / `listen` | TRANSPORT | done |
-| `fcntl(fd, F_SETFL, O_NONBLOCK)` em todo fd | TRANSPORT | doing (socket de escuta feito; os aceitos vêm no passo 2) |
-| **Laço de `poll()` (sessão conjunta)** | BOTH | todo |
-| `accept` de novo cliente + entrada no `_pollFds` | TRANSPORT | todo |
-| `recv` → `appendToReadBuffer` → drenar linhas | TRANSPORT | todo |
+| `fcntl(fd, F_SETFL, O_NONBLOCK)` em todo fd | TRANSPORT | done |
+| **Laço de `poll()`** (era sessão conjunta; feito só pelo Eduardo, em 3 fatias — ver `FASE2.md`) | TRANSPORT | done (esqueleto; `POLLOUT` entra no passo 4) |
+| `accept` de novo cliente + entrada no `_pollFds` | TRANSPORT | done |
+| `recv` → `appendToReadBuffer` → drenar linhas | TRANSPORT | doing (o `recv` e a taxonomia de erro entraram no passo 2; buffer e drenagem no passo 3) |
 | `send` não bloqueante com `POLLOUT` (armado só se há saída) | TRANSPORT | todo |
 | `sendToClient` trunca em 510 antes do CRLF | TRANSPORT | todo |
 | `broadcastToPeers` — destinatários únicos (NICK/QUIT) | TRANSPORT | todo |
-| `disconnectClient` marca; `reapDisconnected` deleta no fim | TRANSPORT | todo |
+| `disconnectClient` marca; `reapDisconnected` deleta no fim | TRANSPORT | done (falta só o flush do passo 4 e a varredura de canais do 4.5) |
 | Despacho para de extrair linhas se `isDisconnecting()` | TRANSPORT | todo |
 | `buildCommandTable` + despacho | TRANSPORT | todo |
 | Porta do registro no despacho (`451`) | TRANSPORT | todo |
 | **`signal(SIGPIPE, SIG_IGN)`** — sem isso o processo morre | TRANSPORT | done |
 | `signal` para `SIGINT` (shutdown sem vazar) | TRANSPORT | done |
-| `EAGAIN`/`EWOULDBLOCK` não é erro nem desconexão | TRANSPORT | todo |
-| `EINTR` repete a chamada | TRANSPORT | doing (feito no `poll`; falta `recv`/`send`) |
-| `POLLHUP` / `POLLERR` / `POLLNVAL` tratados | TRANSPORT | todo |
+| `EAGAIN`/`EWOULDBLOCK` não é erro nem desconexão | TRANSPORT | doing (feito no `accept` e no `recv`; falta o `send`) |
+| `EINTR` repete a chamada | TRANSPORT | doing (feito no `poll` e no `recv`; falta o `send`) |
+| `POLLHUP` / `POLLERR` / `POLLNVAL` tratados | TRANSPORT | done |
 | `cmdPass` (+ `462`, `464`) | TRANSPORT | todo |
 | `cmdNick` (+ `431`, `432`, `433`) | TRANSPORT | todo |
 | `cmdUser` (+ `461`, `462`) | TRANSPORT | todo |

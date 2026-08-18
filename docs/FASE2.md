@@ -22,7 +22,7 @@ para ser defendida linha a linha na avaliação.
 |---|---|---|---|
 | 0 | Decisões e reserva de nomes | `TASKS.md` atualizado, colega avisado | done |
 | 1 | Socket de escuta, sem `poll()` | `ss -ltn` mostra a porta; SIGINT sai limpo | done |
-| 2 | Esqueleto do `poll()` + `accept` + reap | 3 clientes simultâneos, 0% de CPU ocioso | todo |
+| 2 | Esqueleto do `poll()` + `accept` + reap | 3 clientes simultâneos, 0% de CPU ocioso | done |
 | 3 | Caminho de leitura (`recv` → buffer → linhas) | **teste do subject (`com^Dman^Dd`) passa** | todo |
 | 4 | Caminho de escrita (`sendToClient` + `POLLOUT`) | truncagem em 510 e SendQ no `make test` | todo |
 | 4.5 | Gancho de integração: seam de canal real | destrava os handlers do colega | todo |
@@ -175,8 +175,8 @@ Antes de qualquer código, porque é o que impede as duas sessões de divergirem
 **Status:** `done` — 2026-08-15
 
 **Escrever:** `src/Server.cpp` (construtor, destrutor, `stop`,
-`setupListenSocket`), `src/ServerChannels.stub.cpp`, os dois helpers privados no
-`Server.hpp`, e religar o `main.cpp`.
+`installSignalHandlers`, `setupListenSocket`), `src/ServerChannels.stub.cpp`, os
+dois helpers privados no `Server.hpp`, e religar o `main.cpp`.
 
 O construtor põe `_listenFd = -1` e **não toca na rede** — é isso que permite
 construir um `Server` na pilha nos testes unitários dos passos 4 e 6.
@@ -184,9 +184,13 @@ construir um `Server` na pilha nos testes unitários dos passos 4 e 6.
 `socket` → `setsockopt(SO_REUSEADDR)` → `fcntl(fd, F_SETFL, O_NONBLOCK)` →
 `bind` → `listen`.
 
-`signal(SIGPIPE, SIG_IGN)` e `signal(SIGINT, ...)` ficam no `main`, antes de o
-`Server` ser construído. O handler de SIGINT escreve num
-`volatile sig_atomic_t g_shutdown` e mais nada.
+`signal(SIGPIPE, SIG_IGN)` e `signal(SIGINT, ...)` ficam em
+`Server::installSignalHandlers()`, chamada como **primeira linha do `run()`** —
+antes de `setupListenSocket()`, portanto antes de qualquer fd existir, que é a
+única ordem que importa. O plano original os punha no `main`; ficaram no
+`Server` porque assim o `main` não precisa saber quais sinais o transporte usa,
+e nada roda entre construir o `Server` e chamar `run()`. O handler de SIGINT
+escreve num `volatile sig_atomic_t g_shutdown` e mais nada.
 
 **Testes:**
 
@@ -214,10 +218,11 @@ mesmo depois do `poll` dizer legível); por que o handler só escreve um
 
 ### Passo 2 — Esqueleto do `poll()` + `accept` + reap
 
-**Status:** `todo`
+**Status:** `done` — 2026-08-18
 
 **Escrever:** `run()`, `buildPollFds()`, `acceptNewClient()`,
-`reapDisconnected()`. Ainda sem `recv`.
+`findClientByFd()`, `disconnectClient()`, `reapDisconnected()`, e o `recv` de
+`handleReadable()` — ver a nota abaixo sobre por que ele não pôde esperar.
 
 ```cpp
 while (_running && !g_shutdown)
@@ -228,7 +233,9 @@ while (_running && !g_shutdown)
     {
         if (errno == EINTR)
             continue;                            // SIGINT cai aqui; a flag tira do laço
-        break;
+        throw std::runtime_error(...);           // erro real: mensagem + exit 1.
+                                                 // `break` sairia com codigo 0,
+                                                 // fingindo shutdown limpo
     }
     for (size_t i = 0; i < _pollFds.size(); ++i)
     {
@@ -246,9 +253,13 @@ while (_running && !g_shutdown)
         if (re & POLLIN)
             handleReadable(fd);                  // ler ANTES de agir no HUP
         if (re & (POLLERR | POLLHUP | POLLNVAL))
-            markDead(fd);
-        else if (re & POLLOUT)
-            handleWritable(fd);
+        {
+            Client  *client = findClientByFd(fd);
+
+            if (client != NULL)
+                disconnectClient(*client, "Connection closed by peer");
+        }
+        // POLLOUT entra aqui no passo 4, junto com o handleWritable
     }
     reapDisconnected();                          // único lugar onde um Client é deletado
 }
@@ -275,13 +286,36 @@ ls /proc/$(pgrep ircserv)/fd | wc -l           # volta ao normal: sem vazar fd
 top -p $(pgrep ircserv)                        # ocioso com clientes: ~0.0% de CPU
 ```
 
-- [ ] 3 clientes simultâneos sem travar
-- [ ] `kill -9` num cliente não derruba nem afeta os outros
-- [ ] contagem de fds volta depois das desconexões
-- [ ] CPU ociosa em ~0%
+- [x] 3 clientes simultâneos sem travar (4 → 7 fds)
+- [x] `kill -9` num cliente não derruba nem afeta os outros
+- [x] contagem de fds volta depois das desconexões (7 → 6 → 4)
+- [x] CPU ociosa em ~0% (0 ticks em 3 s com 3 clientes; 0 ticks em 4 s
+      **depois** de um cliente mandar bytes)
+- [x] valgrind com 2 clientes conectados no SIGINT: 0 vazamentos, 0 erros
+      (exercita o `delete` dos clientes no `~Server`, que o passo 1 não tocava)
 
 A checagem de CPU não é estética: é a primeira coisa que o avaliador olha, e é
 o que o `poll(..., -1)` mais o `POLLOUT` ainda não armado compram.
+
+**Por que o `recv` foi antecipado do passo 3 para cá.** O plano original dizia
+"ainda sem `recv`", e isso não sobrevive à semântica do `poll()` no Linux: um
+peer que fecha normalmente aparece como **`POLLIN` com `recv` devolvendo 0**,
+não como `POLLHUP` — `POLLHUP` só é reportado quando as duas direções estão
+fechadas. Com o `handleReadable` vazio, esse `POLLIN` nunca seria consumido, o
+`poll()` voltaria na hora toda iteração (é *level-triggered*) e o laço giraria a
+100% de CPU sem nunca reapear o cliente. Ou seja: dois checkboxes deste próprio
+passo falhariam.
+
+A divisão que ficou: **o passo 2 leva a syscall e a taxonomia de erro**
+(`n == 0` → desconecta, `EAGAIN`/`EWOULDBLOCK`/`EINTR` → volta, outro erro →
+desconecta) **e descarta os bytes**; o passo 3 só troca o descarte por
+`appendToReadBuffer` + drenagem. Nada acima dessa linha muda.
+
+**Também entrou aqui, porque o reap não linka sem ele:** o
+`disconnectClient` mínimo — a guarda de reentrância (`isDisconnecting()` →
+volta na hora) já está lá desde o primeiro dia, que é o que impede a recursão
+infinita quando o passo 4 puser o `ERROR :<reason>` na fila de um cliente com a
+SendQ cheia.
 
 ---
 
@@ -289,13 +323,16 @@ o que o `poll(..., -1)` mais o `POLLOUT` ainda não armado compram.
 
 **Status:** `todo`
 
-**Escrever:** `handleReadable(fd)`.
+**Escrever:** o resto do `handleReadable(fd)`. Os quatro primeiros itens
+abaixo **já entraram no passo 2** (ver a nota lá sobre o porquê) e ficam aqui só
+como referência do contrato completo da função:
 
-- Um `recv` de `irc::RECV_CHUNK` por evento de prontidão — nunca laço até
-  `EAGAIN` (`ARCHITECTURE.md` §11 explica o porquê).
-- `n == 0` → o peer fechou → desconecta.
-- `n < 0` com `EAGAIN`/`EWOULDBLOCK` → volta; não é erro nem desconexão.
-- `EINTR` → volta; o próximo `poll` avisa de novo.
+- ~~Um `recv` de `irc::RECV_CHUNK` por evento de prontidão~~ — nunca laço até
+  `EAGAIN` (`ARCHITECTURE.md` §11 explica o porquê). **feito no passo 2**
+- ~~`n == 0` → o peer fechou → desconecta.~~ **feito no passo 2**
+- ~~`n < 0` com `EAGAIN`/`EWOULDBLOCK` → volta; não é erro nem desconexão.~~
+  **feito no passo 2**
+- ~~`EINTR` → volta; o próximo `poll` avisa de novo.~~ **feito no passo 2**
 - `std::string(buf, n)` — nunca a forma de um argumento só.
 - `appendToReadBuffer` retornando `false` → `ERROR :Request too long` +
   `disconnectClient`.
@@ -557,4 +594,4 @@ Espelhar no `TASKS.md` para o colega ver.
 | `src/Channel.cpp` não existe → gancho de integração parado | DOMAIN | — | **resolvido** 2026-08-15, `origin/domain` `da0165f` |
 | D1–D6 aceitas sem o colega ver; D2 e D5 precisam ser comunicadas | Eduardo | 2026-08-15 | **resolvido** 2026-08-15, DOMAIN confirmou tudo |
 | `src/ServerChannels.cpp` de verdade não existe → os handlers de DOMAIN linkam contra o stub e dão segfault no primeiro `JOIN` | TRANSPORT (passo 4.5) | 2026-08-15 | aberto |
-| D5 ainda não anotado no `ARCHITECTURE.md` §5 (passo 0) | Eduardo | 2026-08-15 | aberto |
+| D5 ainda não anotado no `ARCHITECTURE.md` §5 (passo 0) | Eduardo | 2026-08-15 | **resolvido** 2026-08-15, commit `c5a04ef` (§5, subseção Casemapping) |
