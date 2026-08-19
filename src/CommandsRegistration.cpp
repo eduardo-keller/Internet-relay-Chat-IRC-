@@ -213,18 +213,63 @@ void	cmdUser(Server &server, Client &sender, const Message &msg)
 	completeRegistrationIfReady(server, sender);
 }
 
-void	cmdQuit(Server &, Client &, const Message &)
+// --- session commands -----------------------------------------------------
+//
+// None of these four is in the subject's command list. They are here because
+// the subject requires the reference client to connect "without encountering
+// any error", and this is what that costs in practice: irssi opens with CAP,
+// pings periodically and expects a matching PONG, and says QUIT on /quit.
+
+void	cmdQuit(Server &server, Client &sender, const Message &msg)
 {
+	const std::string	reason = msg.params.empty() ? "Client quit"
+							: msg.params[0];
+
+	// MARKS, NEVER DELETES — and this is the handler that makes that matter.
+	// One TCP packet can carry "QUIT :bye\r\nPRIVMSG #c :x\r\n"; the dispatch
+	// loop that called us is still holding this Client& and still has lines
+	// buffered. Deleting here would hand it a dangling reference. Instead the
+	// client is flagged, the drain loop sees isDisconnecting() and stops
+	// extracting, and reapDisconnected does the delete at the end of the poll
+	// iteration — after flushing the ERROR this queues.
+	//
+	// disconnectClient also broadcasts the QUIT to everyone sharing a channel
+	// with the sender, each of them exactly once.
+	server.disconnectClient(sender, reason);
 }
 
-void	cmdPing(Server &, Client &, const Message &)
+void	cmdPing(Server &server, Client &sender, const Message &msg)
 {
+	// irssi pings on a timer and reports a timeout if the token does not come
+	// back. Echoing the token is the entire contract.
+	//
+	// RFC 2812 answers a token-less PING with 409 ERR_NOORIGIN, which is not in
+	// the numeric table both tracks agreed on (ARCHITECTURE.md section 6).
+	// Rather than invent a code, this uses 461: a missing token IS a missing
+	// parameter, and the client learns the same thing.
+	if (msg.params.empty())
+	{
+		replyNeedMoreParams(server, sender, "PING");
+		return ;
+	}
+	server.sendToClient(sender, ":" + server.getServerName() + " PONG "
+		+ server.getServerName() + " :" + msg.params[0]);
 }
 
 void	cmdPong(Server &, Client &, const Message &)
 {
+	// Accepted and ignored, deliberately. A PONG is a client answering a PING
+	// we sent, and this server sends none — it has no ping timer, so there is
+	// no liveness state for a PONG to update. Answering it would be noise.
 }
 
 void	cmdCap(Server &, Client &, const Message &)
 {
+	// Decision D2: a handler that does nothing, on purpose.
+	//
+	// irssi sends "CAP LS 302" before PASS on every single connect. We
+	// implement no capabilities, so there is nothing to negotiate — but
+	// answering 421 would print an error in its status window, and the subject
+	// requires the reference client to connect without encountering any error.
+	// Registering a silent handler is what keeps CAP out of the 421 path.
 }

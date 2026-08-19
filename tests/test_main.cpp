@@ -51,6 +51,7 @@ int	main(void)
 	runClientTests();
 	runServerTests();
 	runCommandRegistrationTests();
+	runCommandSessionTests();
 	runUtilsTests();
 	runMessageTests();
 	runRepliesTests();

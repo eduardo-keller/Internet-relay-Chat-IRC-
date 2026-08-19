@@ -19,6 +19,7 @@ void	checkEqual(const std::string &actual, const std::string &expected,
 void	runClientTests(void);
 void	runServerTests(void);
 void	runCommandRegistrationTests(void);
+void	runCommandSessionTests(void);
 void	runUtilsTests(void);
 void	runMessageTests(void);
 void	runRepliesTests(void);

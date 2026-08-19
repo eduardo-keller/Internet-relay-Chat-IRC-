@@ -93,9 +93,9 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `cmdNick` (+ `431`, `432`, `433`) | TRANSPORT | done (inclui a transmissão da troca de nick aos peers) |
 | `cmdUser` (+ `461`, `462`) | TRANSPORT | done |
 | Rajada de boas-vindas `001`–`004` | TRANSPORT | done (uma vez só, garantido por `welcomeSent()`) |
-| `cmdPing` / `cmdPong` | TRANSPORT | todo |
-| `cmdQuit` | TRANSPORT | todo |
-| `CAP` não derruba o servidor | TRANSPORT | done (handler no-op registrado; sem 421) |
+| `cmdPing` / `cmdPong` | TRANSPORT | done (`PING` sem token → `461`; ver nota no `FASE2.md`) |
+| `cmdQuit` | TRANSPORT | done (`tests/it/session.sh`, sob valgrind) |
+| `CAP` não derruba o servidor | TRANSPORT | done (handler no-op, D2; sem 421 e sem resposta) |
 
 ---
 
@@ -132,7 +132,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | Vários comandos num pacote só | BOTH | todo |
 | Regressão: linha > 512 truncada (implementado na Fase 1) | BOTH | todo |
 | `PRIVMSG` de 504 bytes + prefixo sai truncado em 510 | BOTH | todo |
-| `QUIT` colado com outra linha no mesmo pacote | BOTH | todo |
+| `QUIT` colado com outra linha no mesmo pacote | BOTH | done no passo 7 (`tests/it/session.sh`); repetir com canais quando o `JOIN` existir |
 | Cliente que para de ler (`Ctrl+Z` no `nc`) estoura SendQ | BOTH | done no passo 4 (cliente que não lê → `SendQ exceeded`); refazer com `Ctrl+Z` de verdade na Fase 4 |
 | Bytes NUL e lixo binário não derrubam | BOTH | todo |
 | Cliente morto (`kill -9`) sem `QUIT` | BOTH | todo |

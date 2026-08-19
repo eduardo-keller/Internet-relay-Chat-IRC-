@@ -28,7 +28,7 @@ para ser defendida linha a linha na avaliação.
 | 4.5 | Gancho de integração: seam de canal real | destrava os handlers do colega | done |
 | 5 | Despachante (parse, tabela, `421`, `451`) | `FOO` → 421, `JOIN` sem registro → 451 | done |
 | 6 | `PASS`/`NICK`/`USER` + rajada `001`–`004` | registro ponta a ponta pelo `nc` | done |
-| 7 | `PING`/`PONG`, `QUIT`, `CAP` | `QUIT` colado com outra linha não quebra | todo |
+| 7 | `PING`/`PONG`, `QUIT`, `CAP` | `QUIT` colado com outra linha não quebra | done |
 | 8 | Endurecimento e fechamento da fase | valgrind limpo, 50 clientes, `TASKS.md` | todo |
 
 Os passos 1–4 e 5–8 **não dependem de nada da trilha DOMAIN**. O 4.5 é o único
@@ -630,7 +630,7 @@ printf 'PASS secret\r\nNICK alice\r\nUSER alice 0 * :Alice\r\n' | nc -C -q1 127.
 
 ### Passo 7 — `PING`/`PONG`, `QUIT`, `CAP`
 
-**Status:** `todo`
+**Status:** `done` — 2026-08-18
 
 **Escrever:** `cmdPing` → `:<servername> PONG <servername> :<token>`;
 `cmdPong` → aceita e ignora; `cmdQuit` → `disconnectClient`; `cmdCap` → no-op
@@ -652,10 +652,34 @@ printf 'PASS secret\r\nNICK a\r\nUSER a 0 * :A\r\nQUIT :bye\r\nPRIVMSG #c :x\r\n
 printf 'CAP LS 302\r\n' | nc -C -q1 127.0.0.1 6667   # não derruba
 ```
 
-- [ ] `PING token` devolve o mesmo token
-- [ ] `QUIT` colado com outra linha: a segunda linha não é despachada
-- [ ] o mesmo teste sob valgrind, sem uso de memória liberada
-- [ ] `CAP LS 302` não derruba nem gera erro no cliente
+- [x] `PING token` devolve o mesmo token (e um token com espaços, vindo como
+      parâmetro trailing, volta inteiro)
+- [x] `QUIT` colado com outra linha: a segunda linha não é despachada
+- [x] o mesmo teste sob valgrind, sem uso de memória liberada
+- [x] `CAP LS 302` não derruba nem gera erro no cliente
+- [x] `PING` sem token → `461`, e não um `409` inventado (ver abaixo)
+- [x] tudo em `tests/it/session.sh`, com o servidor **rodando sob valgrind**
+
+**`PING` sem token usa `461`, não `409`.** O RFC 2812 responde `409
+ERR_NOORIGIN`, que **não está** na tabela de numerics que as duas trilhas
+acordaram (`ARCHITECTURE.md` §6). Entre inventar um código e usar um que já
+existe e descreve o mesmo fato — falta um parâmetro — escolhi o `461`. Se o
+irssi reclamar na Fase 3, a correção é adicionar o `409` à tabela **e** avisar,
+não improvisar no handler.
+
+**A validação por mutação corrigiu o que eu achava sobre este passo.** Removi a
+guarda `isDisconnecting()` do laço de drenagem e rodei o teste: o valgrind
+ficou **limpo**, e só a asserção de comportamento falhou. Ou seja, os dois
+mecanismos protegem coisas diferentes, e vale saber qual é qual na avaliação:
+
+| Mecanismo | Do que protege |
+|---|---|
+| Desconexão **adiada** (`disconnectClient` marca, `reapDisconnected` deleta no fim da iteração) | **Segurança de memória.** É ele que faz o `Client&` continuar válido durante todo o laço de drenagem — sem ele, sim, seria use-after-free |
+| **Guarda** no laço de drenagem | **Correção.** Sem ela o servidor despacha alegremente a linha depois do `QUIT`: um `PRIVMSG` entregue por quem já saiu, ou um `JOIN` de um cliente prestes a ser varrido de todos os canais |
+
+O `ARCHITECTURE.md` §4 descreve os dois juntos como prevenção de
+use-after-free. Estritamente, o use-after-free só apareceria se a desconexão
+fosse imediata; a guarda evita o comportamento errado, não a memória inválida.
 
 ---
 
