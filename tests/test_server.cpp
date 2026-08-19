@@ -2,6 +2,7 @@
 
 #include "Channel.hpp"
 #include "Client.hpp"
+#include "Command.hpp"
 #include "Limits.hpp"
 #include "Server.hpp"
 
@@ -236,8 +237,35 @@ static void	testBroadcastToPeersIncludingOrigin(void)
 		"a client in no channel still gets its own NICK echoed");
 }
 
+static void	testCommandTable(void)
+{
+	CommandTable	table = buildCommandTable();
+
+	check(table.find("PASS") != table.end(), "table: PASS is registered");
+	check(table.find("NICK") != table.end(), "table: NICK is registered");
+	check(table.find("USER") != table.end(), "table: USER is registered");
+	check(table.find("QUIT") != table.end(), "table: QUIT is registered");
+	check(table.find("PING") != table.end(), "table: PING is registered");
+	check(table.find("PONG") != table.end(), "table: PONG is registered");
+	check(table.find("CAP") != table.end(), "table: CAP is registered (D2)");
+
+	// The dispatcher uppercases before looking up, so the keys must be
+	// uppercase. A lowercase key would simply never be found — silently.
+	check(table.find("pass") == table.end(),
+		"table: keys are uppercase, matching what the dispatcher searches for");
+
+	// Documents the current state rather than a desired one: the domain
+	// entries stay commented out in src/CommandTable.cpp until their handlers
+	// have bodies, because registering one earlier is an undefined reference
+	// that breaks BOTH binaries. This flips when they land.
+	check(table.find("JOIN") == table.end(),
+		"table: the domain entries are not wired up yet");
+	check(table.size() == 7, "table: exactly the seven transport commands");
+}
+
 void	runServerTests(void)
 {
+	testCommandTable();
 	testOutgoingTruncation();
 	testSendQueueCeiling();
 	testDeferredDisconnect();

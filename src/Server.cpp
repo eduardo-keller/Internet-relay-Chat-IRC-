@@ -13,7 +13,9 @@
 
 #include "Channel.hpp"
 #include "Client.hpp"
+#include "Command.hpp"
 #include "Limits.hpp"
+#include "Message.hpp"
 #include "Replies.hpp"
 #include "Server.hpp"
 
@@ -61,7 +63,8 @@ Server::Server(int port, const std::string &password) :
 	_running(false),
 	_pollFds(),
 	_clients(),
-	_channels()
+	_channels(),
+	_commands(buildCommandTable())
 {
 }
 
@@ -388,41 +391,92 @@ void	Server::handleReadable(int fd)
 		handleLine(*client, line);
 }
 
-// TEMPORARY — step 5 replaces this body with the real dispatcher (parse,
-// table lookup, 421, the registration gate). It exists now only so that the
-// reassembly above is observable before any command handler exists.
+// --- dispatch -------------------------------------------------------------
+
+// IRC command names are case-insensitive, so they are uppercased before the
+// lookup.
 //
-// The echo goes out through sendToClient, like every other byte this server
-// emits, so it is truncated and CRLF-terminated by the same code the real
-// replies will use. The log line stays because tests/it/read_path.sh asserts
-// on it.
+// This is PLAIN ASCII uppercasing, and deliberately NOT the inverse of
+// utils::toIrcLower. That function implements RFC 2812's rule that {}|^ are
+// the lowercase forms of []\~ — a rule about NICKNAMES and CHANNEL names,
+// where it matters because "nick[42]" and "nick{42}" are the same person.
+// Command names contain no such characters, and borrowing the mapping here
+// would only mislead whoever reads it next.
+static std::string	toUpperAscii(const std::string &s)
+{
+	std::string	out(s);
+
+	for (std::string::size_type i = 0; i < out.size(); ++i)
+	{
+		unsigned char	c = static_cast<unsigned char>(out[i]);
+
+		if (c >= 'a' && c <= 'z')
+			out[i] = static_cast<char>(c - 'a' + 'A');
+	}
+	return (out);
+}
+
+// The <target> of a numeric is the recipient's nickname, or "*" while they do
+// not have one yet (ARCHITECTURE.md section 6). Getting this wrong is visible
+// in irssi immediately: it matches replies against its own nick.
+static std::string	replyTarget(const Client &client)
+{
+	if (client.getNickname().empty())
+		return ("*");
+	return (client.getNickname());
+}
+
+// The six commands a client may use before completing PASS/NICK/USER.
+//
+// PONG is deliberately NOT here, per ARCHITECTURE.md section 4. It costs
+// nothing today because this server never sends an unprompted PING, so no
+// client has any reason to PONG before registering.
+static bool	isAllowedBeforeRegistration(const std::string &command)
+{
+	return (command == "PASS" || command == "NICK" || command == "USER"
+		|| command == "QUIT" || command == "PING" || command == "CAP");
+}
+
+// The dispatcher. Parse, uppercase, look up, run — and two error replies that
+// are the whole reason this function exists rather than a switch in the read
+// path.
 void	Server::handleLine(Client &client, const std::string &line)
 {
-	std::cout << "ircserv: line from " << client.getHostname() << " ["
-		<< line << "] (" << line.size() << " bytes)" << std::endl;
+	Message	msg = parseMessage(line);
 
-	// SCAFFOLD, and it dies with the rest of this function in step 5.
-	//
-	// "JOIN #chan" is the only way to get a client into a channel before
-	// cmdJoin exists, and without one the disconnect sweep has no end-to-end
-	// test at all. The bug that sweep prevents is a use-after-free — Channel
-	// holds non-owning Client* — and reading the code is not the same as
-	// reproducing the failure under valgrind. tests/it/channel_seam.sh does
-	// exactly that: two clients in a channel, one killed, the other then
-	// speaking, which walks the member set the dead one was in.
-	if (line.size() > 5 && line.compare(0, 5, "JOIN ") == 0)
+	// An empty command is what the parser yields for a blank or malformed
+	// line, and the answer is SILENCE — not an error reply. Blank lines are
+	// legal traffic: nc sends one every time the user presses Enter on an
+	// empty prompt, and answering them would flood the client with 421s.
+	if (msg.command.empty())
+		return ;
+
+	const std::string				command = toUpperAscii(msg.command);
+	CommandTable::const_iterator	entry = _commands.find(command);
+
+	// UNKNOWN COMMANDS ARE ANSWERED BEFORE THE REGISTRATION GATE. An
+	// unregistered client typing FOO gets 421, not 451, because FOO does not
+	// exist for anybody — replying "you have not registered" would imply that
+	// registering first would make it work.
+	if (entry == _commands.end())
 	{
-		Channel	*channel = getOrCreateChannel(line.substr(5));
-
-		channel->addMember(&client);
-		sendToClient(client, "joined " + channel->getName());
+		sendToClient(client, irc::numeric(_serverName, irc::ERR_UNKNOWNCOMMAND,
+				replyTarget(client), command + " :Unknown command"));
 		return ;
 	}
 
-	// Dereferences every peer pointer, which is the trap: a client deleted
-	// while still listed as a member would be read right here.
-	broadcastToPeers(client, "peer said :" + line, false);
-	sendToClient(client, line);
+	// THE REGISTRATION GATE LIVES HERE AND NOWHERE ELSE. Putting it in the
+	// handlers would mean seven copies of the same check, and the day one of
+	// them is forgotten an unregistered client reaches channel code holding a
+	// Client with no nickname.
+	if (!client.isRegistered() && !isAllowedBeforeRegistration(command))
+	{
+		sendToClient(client, irc::numeric(_serverName, irc::ERR_NOTREGISTERED,
+				replyTarget(client), ":You have not registered"));
+		return ;
+	}
+
+	entry->second(*this, client, msg);
 }
 
 // --- the write path -------------------------------------------------------

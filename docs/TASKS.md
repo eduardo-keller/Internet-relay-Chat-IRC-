@@ -82,8 +82,8 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `broadcastToPeers` — destinatários únicos (NICK/QUIT) | TRANSPORT | done (dedup testado com peer em dois canais) |
 | `disconnectClient` marca; `reapDisconnected` deleta no fim | TRANSPORT | done (varredura de canais incluída; validada por mutação sob valgrind) |
 | Despacho para de extrair linhas se `isDisconnecting()` | TRANSPORT | done (guarda no laço de drenagem; vira crítico com o `cmdQuit` do passo 7) |
-| `buildCommandTable` + despacho | TRANSPORT | todo |
-| Porta do registro no despacho (`451`) | TRANSPORT | todo |
+| `buildCommandTable` + despacho | TRANSPORT | done (`src/CommandTable.cpp`; as 7 entradas do DOMAIN ficam no bloco comentado, uma por linha) |
+| Porta do registro no despacho (`451`) | TRANSPORT | done (busca na tabela **antes** da porta: desconhecido → 421, conhecido sem registro → 451) |
 | **`signal(SIGPIPE, SIG_IGN)`** — sem isso o processo morre | TRANSPORT | done |
 | `signal` para `SIGINT` (shutdown sem vazar) | TRANSPORT | done |
 | `EAGAIN`/`EWOULDBLOCK` não é erro nem desconexão | TRANSPORT | done (`accept`, `recv` e `send`) |
@@ -95,7 +95,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | Rajada de boas-vindas `001`–`004` | TRANSPORT | todo |
 | `cmdPing` / `cmdPong` | TRANSPORT | todo |
 | `cmdQuit` | TRANSPORT | todo |
-| `CAP` não derruba o servidor | TRANSPORT | todo |
+| `CAP` não derruba o servidor | TRANSPORT | done (handler no-op registrado; sem 421) |
 
 ---
 

@@ -1,0 +1,43 @@
+#include "Command.hpp"
+
+// The command table, and the whole dispatch mechanism: a map from an
+// UPPERCASED command name to a function pointer. No command class hierarchy,
+// no factory, no registry singleton — Server::handleLine uppercases what the
+// client sent, looks it up here, and calls what it finds.
+//
+// THIS FILE IS OWNED BY THE TRANSPORT TRACK and it is the one place where the
+// two tracks' work is wired together. That matters because buildCommandTable
+// is a single function that both of us need to fill: if the domain session
+// writes its own in src/Command.cpp, the linker sees two definitions and
+// NEITHER binary builds. So the domain entries live below, in a marked block,
+// one per line — see docs/FASE2.md section 3.3, incompatibility 1.
+
+CommandTable	buildCommandTable()
+{
+	CommandTable	table;
+
+	// --- TRANSPORT (Eduardo) ------------------------------------------
+	table["PASS"] = &cmdPass;
+	table["NICK"] = &cmdNick;
+	table["USER"] = &cmdUser;
+	table["QUIT"] = &cmdQuit;
+	table["PING"] = &cmdPing;
+	table["PONG"] = &cmdPong;
+	table["CAP"] = &cmdCap;
+
+	// --- DOMAIN (colega) ----------------------------------------------
+	// Uncomment each line as its handler gains a body in the domain track's
+	// source file. Registering one before the body exists is an undefined
+	// reference that stops BOTH binaries, including make test, so these are
+	// enabled one at a time and never speculatively.
+	//
+	// table["JOIN"] = &cmdJoin;
+	// table["PART"] = &cmdPart;
+	// table["PRIVMSG"] = &cmdPrivmsg;
+	// table["KICK"] = &cmdKick;
+	// table["INVITE"] = &cmdInvite;
+	// table["TOPIC"] = &cmdTopic;
+	// table["MODE"] = &cmdMode;
+
+	return (table);
+}

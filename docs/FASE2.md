@@ -26,7 +26,7 @@ para ser defendida linha a linha na avaliação.
 | 3 | Caminho de leitura (`recv` → buffer → linhas) | **teste do subject (`com^Dman^Dd`) passa** | done |
 | 4 | Caminho de escrita (`sendToClient` + `POLLOUT`) | truncagem em 510 e SendQ no `make test` | done |
 | 4.5 | Gancho de integração: seam de canal real | destrava os handlers do colega | done |
-| 5 | Despachante (parse, tabela, `421`, `451`) | `FOO` → 421, `JOIN` sem registro → 451 | todo |
+| 5 | Despachante (parse, tabela, `421`, `451`) | `FOO` → 421, `JOIN` sem registro → 451 | done |
 | 6 | `PASS`/`NICK`/`USER` + rajada `001`–`004` | registro ponta a ponta pelo `nc` | todo |
 | 7 | `PING`/`PONG`, `QUIT`, `CAP` | `QUIT` colado com outra linha não quebra | todo |
 | 8 | Endurecimento e fechamento da fase | valgrind limpo, 50 clientes, `TASKS.md` | todo |
@@ -496,7 +496,7 @@ quem está em dois deles.
 
 ### Passo 5 — Despachante: parse, tabela, `421`, `451`
 
-**Status:** `todo`
+**Status:** `done` — 2026-08-18
 
 **Escrever:** o `handleLine` de verdade e `src/CommandTable.cpp`.
 
@@ -522,10 +522,38 @@ printf 'jOiN #x\r\n'        | nc -C -q1 127.0.0.1 6667   # também 451 -> maiusc
 printf '\r\n\r\nPING x\r\n' | nc -C -q1 127.0.0.1 6667   # linha vazia não responde nada
 ```
 
-- [ ] comando desconhecido → `421`
-- [ ] comando de canal antes do registro → `451`
-- [ ] mesmo comando em minúsculas → mesmo resultado
-- [ ] linha vazia não gera resposta
+- [x] comando desconhecido → `421`
+- [x] comando conhecido antes do registro → `451` — ver a nota sobre o `JOIN`
+- [x] mesmo comando em minúsculas → mesmo resultado
+- [x] linha vazia não gera resposta
+- [x] os seis permitidos antes do registro passam pela porta (silêncio, porque
+      os corpos ainda estão vazios — que é o próprio ponto deste passo)
+- [x] valgrind sobre todo esse tráfego: 0 vazamentos, 0 erros
+
+**A ORDEM DAS DUAS CHECAGENS É UMA DECISÃO, não um detalhe.** A busca na tabela
+vem **antes** da porta do registro. Um cliente não registrado que digita `FOO`
+recebe `421`, não `451`: o comando não existe para ninguém, e responder "você
+não se registrou" insinuaria que registrar primeiro faria o `FOO` funcionar. A
+porta só se aplica a comandos que **existem**.
+
+**Consequência que muda um teste desta seção:** enquanto o bloco do DOMAIN
+estiver comentado na `CommandTable.cpp`, `JOIN #x` cai no `421` (comando
+desconhecido), **não** no `451` que este passo previa. Ele vira `451` sozinho no
+dia em que o `cmdJoin` entrar na tabela. O `tests/it/dispatch.sh` afirma o `421`
+de hoje com um comentário dizendo isso — quando falhar, é o lembrete de
+atualizar. O `451` está testado do mesmo jeito, via `PONG`, que está na tabela e
+**não** está na lista dos seis permitidos antes do registro (`ARCHITECTURE.md`
+§4). Isso não é descuido: este servidor nunca manda `PING` sem ser provocado,
+então nenhum cliente tem motivo para mandar `PONG` antes de se registrar.
+
+**Os testes de integração foram reescritos.** O `handleLine` temporário levou
+consigo o eco e o log por linha, que eram a base de asserção do
+`read_path.sh` e do `write_path.sh`. Agora os dois afirmam sobre o que volta
+pelo socket — o `421` faz "o servidor viu exatamente um comando" ser observável
+do lado do cliente, que é prova melhor do que uma linha de debug que nós mesmos
+escrevíamos. O `channel_seam.sh` perdeu o andaime do `JOIN` e **sonda a tabela
+antes de rodar**: hoje ele pula com aviso, e volta a rodar sozinho quando o
+`cmdJoin` existir.
 
 ---
 

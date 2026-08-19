@@ -36,6 +36,12 @@ void	cmdUser(Server &server, Client &sender, const Message &msg);
 void	cmdQuit(Server &server, Client &sender, const Message &msg);
 void	cmdPing(Server &server, Client &sender, const Message &msg);
 void	cmdPong(Server &server, Client &sender, const Message &msg);
+// CAP is not in the subject's command list and we implement no capabilities,
+// but irssi sends "CAP LS 302" before PASS on every connect. Answering 421
+// puts an error in its status window, and the subject requires the reference
+// client to connect "without encountering any error" — so this is a handler
+// that deliberately does nothing. Decision D2 in docs/FASE2.md.
+void	cmdCap(Server &server, Client &sender, const Message &msg);
 
 // --- channels and messaging: DOMAIN track --------------------------------
 void	cmdJoin(Server &server, Client &sender, const Message &msg);

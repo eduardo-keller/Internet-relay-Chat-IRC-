@@ -7,6 +7,8 @@
 
 #include <poll.h>
 
+#include "Command.hpp"
+
 class Channel;
 class Client;
 
@@ -141,6 +143,10 @@ class Server
 		std::vector<struct pollfd>		_pollFds;
 		std::map<int, Client *>			_clients;
 		std::map<std::string, Channel *>	_channels;
+		// Built once, in the constructor, and never mutated afterwards. A
+		// member rather than a function-local static so that its lifetime is
+		// the server's, with nothing hidden.
+		CommandTable						_commands;
 };
 
 #endif
