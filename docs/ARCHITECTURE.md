@@ -105,7 +105,7 @@ void     removeChannel(const std::string &name);
 void     sendToClient(Client &client, const std::string &line);
 void     broadcastToChannel(Channel &channel, const std::string &line,
                             const Client *except);
-void     broadcastToPeers(const Client &origin, const std::string &line,
+void     broadcastToPeers(Client &origin, const std::string &line,
                           bool includeOrigin);
 void     disconnectClient(Client &client, const std::string &reason);
 const std::string &getPassword() const;
@@ -118,6 +118,21 @@ shares *any* channel with the origin, **each of them exactly once**. Looping
 present in two of them, so the recipient set has to be collected and
 deduplicated first. `includeOrigin` is true for `NICK` (irssi wants its own
 change echoed back) and false for `QUIT`.
+
+> **Changed 2026-08-18 (transport):** `origin` was `const Client &` and is now
+> `Client &`. Note the contrast with `except` in `broadcastToChannel`, which
+> stays const: `except` is only ever *compared*, while `includeOrigin` means
+> `broadcastToPeers` may have to *deliver* to the origin — and `sendToClient`
+> takes a non-const reference. The old signature bought nothing and cost a
+> `const_cast` in the body.
+>
+> **This one did not need a conversation first, unlike the rest of this
+> section.** The rule exists to stop the two tracks diverging *silently*, and
+> this change cannot: a non-const `Client &` binds to it fine, so every
+> existing caller keeps compiling, and the only way to break is to pass a
+> `const Client &` — which is a compile error, not a runtime surprise. Command
+> handlers receive `Client &sender` (non-const) anyway, and the only commands
+> that call this are `NICK` and `QUIT`, both on the transport side.
 
 ### Disconnection is deferred, never immediate
 

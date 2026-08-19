@@ -11,8 +11,10 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "Channel.hpp"
 #include "Client.hpp"
 #include "Limits.hpp"
+#include "Replies.hpp"
 #include "Server.hpp"
 
 // The transport half of the server. See include/Server.hpp for the seam the
@@ -398,6 +400,28 @@ void	Server::handleLine(Client &client, const std::string &line)
 {
 	std::cout << "ircserv: line from " << client.getHostname() << " ["
 		<< line << "] (" << line.size() << " bytes)" << std::endl;
+
+	// SCAFFOLD, and it dies with the rest of this function in step 5.
+	//
+	// "JOIN #chan" is the only way to get a client into a channel before
+	// cmdJoin exists, and without one the disconnect sweep has no end-to-end
+	// test at all. The bug that sweep prevents is a use-after-free — Channel
+	// holds non-owning Client* — and reading the code is not the same as
+	// reproducing the failure under valgrind. tests/it/channel_seam.sh does
+	// exactly that: two clients in a channel, one killed, the other then
+	// speaking, which walks the member set the dead one was in.
+	if (line.size() > 5 && line.compare(0, 5, "JOIN ") == 0)
+	{
+		Channel	*channel = getOrCreateChannel(line.substr(5));
+
+		channel->addMember(&client);
+		sendToClient(client, "joined " + channel->getName());
+		return ;
+	}
+
+	// Dereferences every peer pointer, which is the trap: a client deleted
+	// while still listed as a member would be read right here.
+	broadcastToPeers(client, "peer said :" + line, false);
 	sendToClient(client, line);
 }
 
@@ -477,8 +501,18 @@ void	Server::disconnectClient(Client &client, const std::string &reason)
 	// that second call return at the line above instead of recursing forever.
 	client.markDisconnecting(reason);
 
-	// Step 4.5 adds the QUIT broadcast to the client's peers here, once
-	// channels exist to find those peers in.
+	// THE PEERS ARE TOLD WHILE THE CLIENT IS STILL A MEMBER. sweepChannels
+	// runs later, in reapDisconnected, so the recipient set is still complete
+	// here — do this after the sweep and the QUIT reaches nobody.
+	//
+	// Only for a registered client: one that never got past PASS/NICK/USER has
+	// no nickname to build a prefix from, and no peers to tell either.
+	// includeOrigin is false — a client does not need its own QUIT echoed, and
+	// it is about to receive the ERROR below instead.
+	if (client.isRegistered())
+		broadcastToPeers(client,
+			irc::fromClient(client.prefix(), "QUIT", ":" + reason), false);
+
 	sendToClient(client, "ERROR :" + reason);
 }
 

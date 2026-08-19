@@ -64,7 +64,13 @@ class Server
 		// origin's channels would deliver duplicates to anyone in two of
 		// them. `includeOrigin` is true for NICK (irssi wants its own change
 		// echoed back) and false for QUIT.
-		void	broadcastToPeers(const Client &origin, const std::string &line,
+		//
+		// `origin` IS NOT const, unlike `except` above, and the difference is
+		// the point: `except` is only ever compared, while `includeOrigin`
+		// means this function may have to DELIVER to the origin — which needs
+		// the non-const reference sendToClient takes. Changed 2026-08-18; it
+		// was const, which cost a const_cast in the body. See FASE2.md D7.
+		void	broadcastToPeers(Client &origin, const std::string &line,
 					bool includeOrigin);
 
 		// Marks the client for disconnection; it is NOT deleted here.

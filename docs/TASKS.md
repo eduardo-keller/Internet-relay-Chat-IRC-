@@ -79,8 +79,8 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `recv` → `appendToReadBuffer` → drenar linhas | TRANSPORT | done (`tests/it/read_path.sh`) |
 | `send` não bloqueante com `POLLOUT` (armado só se há saída) | TRANSPORT | done |
 | `sendToClient` trunca em 510 antes do CRLF | TRANSPORT | done (`tests/test_server.cpp`) |
-| `broadcastToPeers` — destinatários únicos (NICK/QUIT) | TRANSPORT | todo |
-| `disconnectClient` marca; `reapDisconnected` deleta no fim | TRANSPORT | done (falta só a varredura de canais do 4.5) |
+| `broadcastToPeers` — destinatários únicos (NICK/QUIT) | TRANSPORT | done (dedup testado com peer em dois canais) |
+| `disconnectClient` marca; `reapDisconnected` deleta no fim | TRANSPORT | done (varredura de canais incluída; validada por mutação sob valgrind) |
 | Despacho para de extrair linhas se `isDisconnecting()` | TRANSPORT | done (guarda no laço de drenagem; vira crítico com o `cmdQuit` do passo 7) |
 | `buildCommandTable` + despacho | TRANSPORT | todo |
 | Porta do registro no despacho (`451`) | TRANSPORT | todo |

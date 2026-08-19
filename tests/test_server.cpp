@@ -1,5 +1,6 @@
 #include <string>
 
+#include "Channel.hpp"
 #include "Client.hpp"
 #include "Limits.hpp"
 #include "Server.hpp"
@@ -112,10 +113,137 @@ static void	testDisconnectOnFullQueueTerminates(void)
 		"disconnecting a client with a full queue terminates");
 }
 
+// How many times `needle` appears in `haystack`. "Exactly once" is the whole
+// point of broadcastToPeers, and "at least once" would pass even when the bug
+// is present.
+static int	countOccurrences(const std::string &haystack,
+				const std::string &needle)
+{
+	int						count = 0;
+	std::string::size_type	pos = haystack.find(needle);
+
+	while (pos != std::string::npos)
+	{
+		++count;
+		pos = haystack.find(needle, pos + needle.size());
+	}
+	return (count);
+}
+
+static void	testChannelLookupIsCaseInsensitive(void)
+{
+	Server	server(6667, "secret");
+
+	check(server.findChannel("#nope") == NULL,
+		"findChannel returns NULL for a channel that does not exist");
+
+	Channel	*created = server.getOrCreateChannel("#Dev");
+
+	check(created != NULL, "getOrCreateChannel creates a channel");
+	checkEqual(created->getName(), "#Dev",
+		"the channel keeps the ORIGINAL spelling for display");
+
+	// The silent-failure case from decision D5: without the lowercased key,
+	// this returns NULL and a second #dev is created alongside the first.
+	check(server.findChannel("#dev") == created,
+		"#dev finds the channel created as #Dev");
+	check(server.findChannel("#DEV") == created,
+		"and so does #DEV");
+	check(server.getOrCreateChannel("#dEv") == created,
+		"getOrCreateChannel does not create a second one under another case");
+
+	server.removeChannel("#DEV");
+	check(server.findChannel("#Dev") == NULL,
+		"removeChannel is case-insensitive too");
+}
+
+static void	testBroadcastToChannel(void)
+{
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+	Server	server(6667, "secret");
+
+	Channel	*channel = server.getOrCreateChannel("#room");
+
+	channel->addMember(&alice);
+	channel->addMember(&bob);
+
+	server.broadcastToChannel(*channel, "HELLO", NULL);
+	checkEqual(alice.getOutputBuffer(), "HELLO\r\n",
+		"broadcastToChannel reaches every member");
+	checkEqual(bob.getOutputBuffer(), "HELLO\r\n",
+		"broadcastToChannel reaches the second member too");
+
+	server.broadcastToChannel(*channel, "AGAIN", &alice);
+	checkEqual(alice.getOutputBuffer(), "HELLO\r\n",
+		"the `except` client is skipped — how PRIVMSG avoids echoing back");
+	checkEqual(bob.getOutputBuffer(), "HELLO\r\nAGAIN\r\n",
+		"while everyone else still receives it");
+}
+
+static void	testBroadcastToPeersDeduplicates(void)
+{
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+	Client	stranger(-1, "localhost");
+	Server	server(6667, "secret");
+
+	// Alice and Bob share TWO channels. This is the case that makes the naive
+	// implementation — looping broadcastToChannel over the origin's channels —
+	// deliver Bob two copies of every QUIT and every NICK.
+	Channel	*first = server.getOrCreateChannel("#one");
+	Channel	*second = server.getOrCreateChannel("#two");
+	Channel	*elsewhere = server.getOrCreateChannel("#elsewhere");
+
+	first->addMember(&alice);
+	first->addMember(&bob);
+	second->addMember(&alice);
+	second->addMember(&bob);
+	elsewhere->addMember(&stranger);
+
+	server.broadcastToPeers(alice, "QUIT :bye", false);
+
+	check(countOccurrences(bob.getOutputBuffer(), "QUIT :bye") == 1,
+		"a peer in TWO shared channels receives the line exactly once");
+	checkEqual(alice.getOutputBuffer(), "",
+		"includeOrigin=false leaves the origin out — the QUIT case");
+	checkEqual(stranger.getOutputBuffer(), "",
+		"someone who shares no channel receives nothing");
+}
+
+static void	testBroadcastToPeersIncludingOrigin(void)
+{
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+	Server	server(6667, "secret");
+
+	Channel	*channel = server.getOrCreateChannel("#room");
+
+	channel->addMember(&alice);
+	channel->addMember(&bob);
+
+	server.broadcastToPeers(alice, "NICK :newnick", true);
+	check(countOccurrences(alice.getOutputBuffer(), "NICK :newnick") == 1,
+		"includeOrigin=true echoes to the origin — the NICK case");
+	check(countOccurrences(bob.getOutputBuffer(), "NICK :newnick") == 1,
+		"and still reaches the peers exactly once");
+
+	// A client that has joined nothing at all still has to see its own NICK.
+	Client	loner(-1, "localhost");
+
+	server.broadcastToPeers(loner, "NICK :solo", true);
+	checkEqual(loner.getOutputBuffer(), "NICK :solo\r\n",
+		"a client in no channel still gets its own NICK echoed");
+}
+
 void	runServerTests(void)
 {
 	testOutgoingTruncation();
 	testSendQueueCeiling();
 	testDeferredDisconnect();
 	testDisconnectOnFullQueueTerminates();
+	testChannelLookupIsCaseInsensitive();
+	testBroadcastToChannel();
+	testBroadcastToPeersDeduplicates();
+	testBroadcastToPeersIncludingOrigin();
 }

@@ -25,7 +25,7 @@ para ser defendida linha a linha na avaliação.
 | 2 | Esqueleto do `poll()` + `accept` + reap | 3 clientes simultâneos, 0% de CPU ocioso | done |
 | 3 | Caminho de leitura (`recv` → buffer → linhas) | **teste do subject (`com^Dman^Dd`) passa** | done |
 | 4 | Caminho de escrita (`sendToClient` + `POLLOUT`) | truncagem em 510 e SendQ no `make test` | done |
-| 4.5 | Gancho de integração: seam de canal real | destrava os handlers do colega | todo |
+| 4.5 | Gancho de integração: seam de canal real | destrava os handlers do colega | done |
 | 5 | Despachante (parse, tabela, `421`, `451`) | `FOO` → 421, `JOIN` sem registro → 451 | todo |
 | 6 | `PASS`/`NICK`/`USER` + rajada `001`–`004` | registro ponta a ponta pelo `nc` | todo |
 | 7 | `PING`/`PONG`, `QUIT`, `CAP` | `QUIT` colado com outra linha não quebra | todo |
@@ -55,6 +55,7 @@ os outros ficam inteiros dentro de código do TRANSPORT.
 | D4 | `003 RPL_CREATED` | `__DATE__ " " __TIME__` — sem syscall, fácil de explicar | aceita |
 | D5 | Chave do mapa `_channels` | `utils::toIrcLower(nome)`; `Channel::getName()` guarda a grafia original para exibição. **Contrato entre as trilhas — anotar no `ARCHITECTURE.md` §5** | aceita |
 | D6 | Testes de integração versionados | sim, em `tests/it/*.sh`, fora do build avaliado | aceita |
+| D7 | Constness do `origin` em `broadcastToPeers` | Era `const Client &`, virou **`Client &`**. O `includeOrigin = true` exige *entregar* ao origin, e `sendToClient` pede referência não-const — o `const` descrevia a função de antes do `includeOrigin` existir, e custava um `const_cast` no corpo. Contraste proposital com o `except` do `broadcastToChannel`, que continua const porque é só comparado. **Não precisou de acordo prévio:** a mudança não pode divergir em silêncio (referência não-const liga sem problema; passar `const` seria erro de compilação), e os dois únicos comandos que chamam a função, `NICK` e `QUIT`, são do TRANSPORT | aceita 2026-08-18, anotada no `ARCHITECTURE.md` §4 |
 
 ---
 
@@ -437,7 +438,7 @@ check(c.isDisconnecting(),
 
 ### Passo 4.5 — Gancho de integração: o seam de canal de verdade
 
-**Status:** `todo`
+**Status:** `done` — 2026-08-18
 
 **Estava no fim da fase (era o passo 9) e foi promovido para cá em 2026-08-15**,
 quando o colega publicou `src/Channel.cpp` completo em `origin/domain`
@@ -454,16 +455,32 @@ exatamente para isso que o stub existiu. Ficou decidido em 2026-08-15 **não**
 mergear antes disso, para a `transport_fase_2` não carregar o trabalho da outra
 trilha durante os passos 2 a 4.
 
-- [ ] `git merge origin/domain` (traz `Channel.cpp` e os testes de canal dele)
-- [ ] `git rm src/ServerChannels.stub.cpp`
-- [ ] `src/ServerChannels.cpp` de verdade: `findChannel`, `getOrCreateChannel`,
+- [x] `git merge origin/domain` — **sem um único conflito**. Os três arquivos
+      que as duas trilhas tocaram (`docs/TASKS.md`, `tests/harness.hpp`,
+      `tests/test_main.cpp`) foram auto-mergeados
+- [x] `git rm src/ServerChannels.stub.cpp`
+- [x] `src/ServerChannels.cpp` de verdade: `findChannel`, `getOrCreateChannel`,
       `removeChannel`, `broadcastToChannel`, `broadcastToPeers`,
       `sweepChannels`, `clearAllChannels`
-- [ ] chave do mapa `_channels` é `utils::toIrcLower(nome)` (D5)
-- [ ] `disconnectClient` passa a transmitir o `QUIT` aos peers
-- [ ] teste: cliente que sai de canal cheio não deixa ponteiro pendurado
-      (valgrind + dois clientes num canal)
-- [ ] `make test` verde com os testes de `Channel` dele juntos
+- [x] chave do mapa `_channels` é `utils::toIrcLower(nome)` (D5), com
+      `getName()` guardando a grafia original — testado com `#Dev`/`#dev`/`#DEV`
+- [x] `disconnectClient` passa a transmitir o `QUIT` aos peers, **antes** da
+      varredura: depois dela o conjunto de destinatários já estaria vazio
+- [x] teste: cliente que sai de canal cheio não deixa ponteiro pendurado —
+      `tests/it/channel_seam.sh`, sob valgrind
+- [x] `make test` verde com os testes de `Channel` dele juntos: **335 passed**
+      (187 meus + 131 dele + 17 novos do seam)
+
+**O teste do ponteiro pendurado foi validado por mutação.** Quebrei o
+`sweepChannels` de propósito e rodei o script: 19 leituras/escritas em memória
+liberada, memória definitivamente vazada, `--error-exitcode=42` disparando. E o
+checkbox "servidor sobreviveu" **continuou verde** — que é exatamente por que
+esse teste roda sob valgrind: sem ele o bug é silencioso.
+
+**Um andaime entrou junto, e sai no passo 5:** `handleLine` reconhece
+`JOIN #chan`. Sem cmdJoin ninguém consegue entrar num canal pela rede, e sem
+isso o `sweepChannels` — a função mais arriscada deste passo — ficaria com zero
+cobertura. Ele morre junto com o resto do `handleLine` temporário.
 
 `cmdNick` transmitindo a troca de nick aos peers (`includeOrigin = true`) e as 7
 entradas de DOMAIN na `CommandTable.cpp` ficam para depois dos passos 6 e 5
@@ -630,5 +647,5 @@ Espelhar no `TASKS.md` para o colega ver.
 |---|---|---|---|
 | `src/Channel.cpp` não existe → gancho de integração parado | DOMAIN | — | **resolvido** 2026-08-15, `origin/domain` `da0165f` |
 | D1–D6 aceitas sem o colega ver; D2 e D5 precisam ser comunicadas | Eduardo | 2026-08-15 | **resolvido** 2026-08-15, DOMAIN confirmou tudo |
-| `src/ServerChannels.cpp` de verdade não existe → os handlers de DOMAIN linkam contra o stub e dão segfault no primeiro `JOIN` | TRANSPORT (passo 4.5) | 2026-08-15 | aberto |
+| `src/ServerChannels.cpp` de verdade não existe → os handlers de DOMAIN linkam contra o stub e dão segfault no primeiro `JOIN` | TRANSPORT (passo 4.5) | 2026-08-15 | **resolvido** 2026-08-18, passo 4.5 — o stub foi apagado e o seam é real |
 | D5 ainda não anotado no `ARCHITECTURE.md` §5 (passo 0) | Eduardo | 2026-08-15 | **resolvido** 2026-08-15, commit `c5a04ef` (§5, subseção Casemapping) |
