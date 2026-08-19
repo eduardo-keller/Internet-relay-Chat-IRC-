@@ -299,6 +299,37 @@ Do not invent codes and do not reword these strings.
 > **462 is spelled `ERR_ALREADYREGISTRED` in the RFC** — the missing `E` is in
 > the standard, not a typo of ours.
 
+### The welcome burst, concretely
+
+Decided in phase 2 and binding on both tracks, because these strings are what
+irssi is matched against:
+
+| What | Value | Why |
+|---|---|---|
+| `<servername>` | the fixed string `ircserv` | Deriving it from the machine would need `gethostname`, which is **not** in the subject's allowed-function list. (That list has `gethostbyname`, which is a different call: name → IP address.) |
+| `<version>` | `1.0` | Appears in 002 and 004. |
+| 003's date | `__DATE__ " " __TIME__` | Filled in by the compiler: no syscall, no stored state, and trivially explainable. |
+| 004's payload | `ircserv 1.0 - itkol` | `-` is the user-mode field: we implement none. `itkol` is every channel mode we do implement. |
+
+So a registered client sees exactly:
+
+```
+:ircserv 001 alice :Welcome to the Internet Relay Network alice!alice@127.0.0.1
+:ircserv 002 alice :Your host is ircserv, running version 1.0
+:ircserv 003 alice :This server was created <compile date>
+:ircserv 004 alice ircserv 1.0 - itkol
+```
+
+The burst fires **once**, on the transition into registered, and is guarded by
+`Client::welcomeSent()` rather than by `isRegistered()` — the latter stays true
+forever afterwards and would replay the welcome on every subsequent `NICK`.
+
+> **`PING` with no token answers 461, not 409.** RFC 2812 uses
+> `409 ERR_NOORIGIN`, which is not in the table above. Rather than invent a
+> code, the server reuses `461`: a missing token is a missing parameter. If
+> irssi objects in phase 3, add 409 to the table **and say so** — do not
+> improvise in the handler.
+
 > **Two codes where RFC 1459 and RFC 2812 disagree.** For 341, RFC 2812 says
 > `<channel> <nick>` while RFC 1459 says `<nick> <channel>`, and most real
 > servers follow 1459. For 366, RFC 2812 says `End of NAMES list` while much
@@ -366,8 +397,11 @@ Rules:
 Test against these, not against a clean-room reading of the RFC:
 
 1. Sends `CAP LS 302` **before** `PASS`. We do not implement capabilities.
-   Either ignore `CAP` silently or reply `421`. Do **not** treat it as a
-   registration step and do **not** crash on it.
+   **Decided in phase 2: ignore it silently** — `cmdCap` is a registered
+   handler with an empty body. The alternative, replying `421`, puts an error
+   line in irssi's status window, and the subject requires the reference client
+   to connect "without encountering any error". It is **not** a registration
+   step and must not crash anything.
 2. Sends `PASS`, `NICK`, `USER` back to back — often in a **single TCP packet**.
    The read buffer must split that into three commands.
 3. Sends `PING` periodically and expects a `PONG` with the same token. Miss it
@@ -408,6 +442,18 @@ logic is internally consistent. Run it constantly.
 
 **Outer loop (slow, `nc` and irssi).** Proves protocol conformance: numerics,
 prefixes, trailing params, CRLF, the JOIN sequence.
+
+**The outer loop is versioned, not typed from memory.** Phase 2 decision: it
+lives in `tests/it/*.sh`, outside the graded build, one script per concern.
+Each starts its own `ircserv` on a spare port, drives it over TCP and asserts
+on the bytes that come back. Two of them run the server under `valgrind`,
+because the bug they cover — a freed `Client` still pointed at by a `Channel`,
+and a `QUIT` sharing a packet with the next command — is silent without it.
+`docs/README.md` lists them and how to run them.
+
+> Two of those scripts were **validated by mutation**: the defect they exist to
+> catch was deliberately reintroduced, and each was confirmed to fail. A test
+> that has never seen its own bug is a guess.
 
 > A parser can pass every test we write for it and still disagree with irssi.
 > Unit tests prove we are consistent, not that we are correct. Only the RFC and

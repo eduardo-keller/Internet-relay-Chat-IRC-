@@ -70,6 +70,10 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 
 ## Fase 2 — Servidor vivo
 
+**Fase concluída em 2026-08-18** (trilha TRANSPORT). Passos 0 a 8 do
+`FASE2.md`, oito commits na `transport_fase_2`. `make test` em 395 asserções e
+46 casos de integração em 7 scripts. Falta só o merge para a `main` via PR.
+
 | Item | Dono | Status |
 |---|---|---|
 | `socket` / `setsockopt` / `bind` / `listen` | TRANSPORT | done |
@@ -128,17 +132,17 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 
 | Item | Dono | Status |
 |---|---|---|
-| Pacote parcial via `nc -C` (teste do subject) | BOTH | todo |
-| Vários comandos num pacote só | BOTH | todo |
-| Regressão: linha > 512 truncada (implementado na Fase 1) | BOTH | todo |
-| `PRIVMSG` de 504 bytes + prefixo sai truncado em 510 | BOTH | todo |
+| Pacote parcial via `nc -C` (teste do subject) | BOTH | done roteirizado (`tests/it/read_path.sh`); falta o `Ctrl+D` na mão |
+| Vários comandos num pacote só | BOTH | done (`read_path.sh`, `registration.sh`) |
+| Regressão: linha > 512 truncada (implementado na Fase 1) | BOTH | done (`write_path.sh`, `hardening.sh`) |
+| `PRIVMSG` de 504 bytes + prefixo sai truncado em 510 | BOTH | mecanismo pronto e testado (`sendToClient`); falta o caso com `PRIVMSG` de verdade |
 | `QUIT` colado com outra linha no mesmo pacote | BOTH | done no passo 7 (`tests/it/session.sh`); repetir com canais quando o `JOIN` existir |
 | Cliente que para de ler (`Ctrl+Z` no `nc`) estoura SendQ | BOTH | done no passo 4 (cliente que não lê → `SendQ exceeded`); refazer com `Ctrl+Z` de verdade na Fase 4 |
-| Bytes NUL e lixo binário não derrubam | BOTH | todo |
-| Cliente morto (`kill -9`) sem `QUIT` | BOTH | todo |
-| Muitos clientes simultâneos | BOTH | todo |
-| `valgrind` sem vazamento | BOTH | todo |
-| Nenhum retorno de syscall ignorado | BOTH | todo |
+| Bytes NUL e lixo binário não derrubam | BOTH | done (`hardening.sh`: `/dev/urandom` e NUL no meio do comando) |
+| Cliente morto (`kill -9`) sem `QUIT` | BOTH | done (passo 2, e de novo no `hardening.sh`) |
+| Muitos clientes simultâneos | BOTH | done (50 conexões simultâneas no `hardening.sh`) |
+| `valgrind` sem vazamento | BOTH | done na trilha TRANSPORT (27 clientes conectados no SIGINT: 0 bytes, 0 erros); refazer com os comandos de canal |
+| Nenhum retorno de syscall ignorado | BOTH | done na trilha TRANSPORT (auditado no passo 8; só `close`/`signal` ficam de fora, com motivo no código) |
 | Ensaio: Eduardo explica a trilha DOMAIN | TRANSPORT | todo |
 | Ensaio: colega explica a trilha TRANSPORT | DOMAIN | todo |
 

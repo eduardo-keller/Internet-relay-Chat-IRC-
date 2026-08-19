@@ -69,6 +69,14 @@ Server::Server(int port, const std::string &password) :
 {
 }
 
+// close() IS THE ONE SYSCALL WHOSE RETURN THIS FILE IGNORES, here and in
+// reapDisconnected, and that is deliberate rather than an oversight.
+//
+// A failing close() gives EBADF — the fd was already invalid, so there is
+// nothing left to do — or EINTR, where on Linux the descriptor IS closed
+// anyway. Retrying would then close a number the kernel may have already
+// handed to another connection, which is far worse than the error being
+// dropped. Every other syscall here has its return read.
 Server::~Server()
 {
 	for (std::map<int, Client *>::iterator it = _clients.begin();

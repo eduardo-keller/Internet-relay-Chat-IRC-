@@ -29,7 +29,7 @@ para ser defendida linha a linha na avaliação.
 | 5 | Despachante (parse, tabela, `421`, `451`) | `FOO` → 421, `JOIN` sem registro → 451 | done |
 | 6 | `PASS`/`NICK`/`USER` + rajada `001`–`004` | registro ponta a ponta pelo `nc` | done |
 | 7 | `PING`/`PONG`, `QUIT`, `CAP` | `QUIT` colado com outra linha não quebra | done |
-| 8 | Endurecimento e fechamento da fase | valgrind limpo, 50 clientes, `TASKS.md` | todo |
+| 8 | Endurecimento e fechamento da fase | valgrind limpo, 50 clientes, `TASKS.md` | done |
 
 Os passos 1–4 e 5–8 **não dependem de nada da trilha DOMAIN**. O 4.5 é o único
 que precisa do `Channel.cpp`, e era o passo 9 até 2026-08-15 — foi promovido
@@ -685,15 +685,36 @@ fosse imediata; a guarda evita o comportamento errado, não a memória inválida
 
 ### Passo 8 — Endurecimento e fechamento da fase
 
-**Status:** `todo`
+**Status:** `done` — 2026-08-18
 
-- [ ] bytes NUL e lixo binário (`head -c 200 /dev/urandom`) não derrubam
-- [ ] 50 conexões simultâneas num laço
-- [ ] `valgrind --leak-check=full` com clientes conectados no SIGINT: 0 vazamentos
-- [ ] leitura de todo retorno de `recv`/`send`/`accept`/`poll`: nenhum ignorado
-- [ ] `TASKS.md` atualizado (Fase 2 → `done`)
-- [ ] decisões D1–D6 anotadas no `ARCHITECTURE.md`
-- [ ] `README.md` com como rodar `tests/it/*.sh`
+- [x] bytes NUL e lixo binário (`head -c 200 /dev/urandom`) não derrubam — e o
+      NUL no meio de `PI\0NG token` é descartado, com o comando funcionando
+- [x] 50 conexões simultâneas num laço (todas registradas, fds voltando ao
+      normal depois), mais 30 conexões abertas e fechadas na hora
+- [x] `valgrind --leak-check=full` com clientes conectados no SIGINT:
+      **27 clientes vivos, 0 bytes in use at exit, 0 erros**
+- [x] leitura de todo retorno de `recv`/`send`/`accept`/`poll`: nenhum ignorado
+- [x] `TASKS.md` atualizado (Fase 2 → `done`)
+- [x] decisões D1–D7 anotadas no `ARCHITECTURE.md`
+- [x] `README.md` com como rodar `tests/it/*.sh`
+
+**A auditoria de syscall passou, com duas exceções deliberadas.** Todo retorno
+de `socket`, `setsockopt`, `fcntl`, `bind`, `listen`, `poll`, `accept`, `recv` e
+`send` é lido. Ficam de fora `signal` (devolve o handler anterior, que não nos
+interessa) e `close` — e o motivo do `close` está escrito no código, porque é o
+que um avaliador pergunta: um `close` que falha dá `EBADF`, e aí não há o que
+fazer, ou `EINTR`, em que no Linux **o descritor é fechado assim mesmo**.
+Repetir a chamada fecharia um número que o kernel pode já ter entregue a outra
+conexão — bem pior do que perder o erro.
+
+**Um teste meu estava errado, não o código.** Escrevi que uma linha de 5000
+bytes **com** CRLF deveria ser truncada em 510. Ela não é: se o CRLF chegar num
+segmento TCP separado, o `recv` anterior deixa o buffer com 5000 bytes e nenhum
+terminador, e aí a política do `ARCHITECTURE.md` §11 manda desconectar — o
+servidor não tem como adivinhar que vem um CRLF depois, e uma linha desse
+tamanho é ilegal de qualquer jeito (o RFC limita em 512). A fronteira da
+truncagem é o `MAX_READ_BUFFER`, não o 510. Corrigi o teste para 4000 bytes,
+que é o caso que a política realmente descreve.
 
 ---
 

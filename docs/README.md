@@ -148,6 +148,48 @@ New files such as `tests/test_parser.cpp` are picked up automatically —
 `tests/*.cpp` is globbed, so no Makefile edit is needed. Do not put a second
 `main()` in them.
 
+### The integration tests
+
+`make test` proves the logic is internally consistent. It cannot prove that the
+server speaks IRC over a socket, because nothing in it opens one. That is what
+`tests/it/*.sh` is for: each script starts its own `ircserv` on a spare port,
+drives it over TCP, asserts on the bytes that come back, and shuts it down.
+
+They are **not** part of the graded build and `make` never runs them. Run them
+by hand, with the server stopped — each script starts its own:
+
+```sh
+./tests/it/read_path.sh      # packet reassembly: the subject's com^Dman^Dd case
+./tests/it/write_path.sh     # CRLF, the 510-byte truncation, ERROR before close
+./tests/it/dispatch.sh       # 421, 451, case-insensitivity, blank lines
+./tests/it/registration.sh   # PASS/NICK/USER, 001-004, 433 with two connections
+./tests/it/session.sh        # PING/PONG, QUIT glued to another command, CAP
+./tests/it/hardening.sh      # binary garbage, NUL bytes, 50 connections at once
+./tests/it/channel_seam.sh   # the disconnect sweep, under valgrind
+
+for t in tests/it/*.sh; do "$t" || echo "FAILED: $t"; done
+```
+
+Each takes a port as its optional first argument, defaulting to one in the
+6690-6704 range so that two of them never collide. Each prints one line per
+case and exits non-zero if anything failed, so they work in a loop like the one
+above.
+
+Two of them run the server under **valgrind** rather than plain, because the
+bug they cover is invisible otherwise: `channel_seam.sh` (a `Client` deleted
+while a `Channel` still points at it) and `session.sh` (a `QUIT` sharing a
+packet with the command after it). They need `valgrind` installed and take a
+few seconds longer.
+
+`channel_seam.sh` **skips itself** while `JOIN` is not in the command table —
+it probes for it first and says so. It reactivates on its own once the handler
+is registered.
+
+> These scripts assert on what the server sends back. Where an earlier version
+> asserted on the server's own log output, that was a stopgap for the days
+> before the server could reply at all; a debug line we write ourselves proves
+> much less than the protocol bytes a client actually receives.
+
 ## Layout
 
 `src/` holds the implementation and `include/` the headers, one class per file.
