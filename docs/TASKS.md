@@ -89,10 +89,10 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `EAGAIN`/`EWOULDBLOCK` não é erro nem desconexão | TRANSPORT | done (`accept`, `recv` e `send`) |
 | `EINTR` repete a chamada | TRANSPORT | done (`poll`, `recv` e `send`) |
 | `POLLHUP` / `POLLERR` / `POLLNVAL` tratados | TRANSPORT | done |
-| `cmdPass` (+ `462`, `464`) | TRANSPORT | todo |
-| `cmdNick` (+ `431`, `432`, `433`) | TRANSPORT | todo |
-| `cmdUser` (+ `461`, `462`) | TRANSPORT | todo |
-| Rajada de boas-vindas `001`–`004` | TRANSPORT | todo |
+| `cmdPass` (+ `462`, `464`) | TRANSPORT | done |
+| `cmdNick` (+ `431`, `432`, `433`) | TRANSPORT | done (inclui a transmissão da troca de nick aos peers) |
+| `cmdUser` (+ `461`, `462`) | TRANSPORT | done |
+| Rajada de boas-vindas `001`–`004` | TRANSPORT | done (uma vez só, garantido por `welcomeSent()`) |
 | `cmdPing` / `cmdPong` | TRANSPORT | todo |
 | `cmdQuit` | TRANSPORT | todo |
 | `CAP` não derruba o servidor | TRANSPORT | done (handler no-op registrado; sem 421) |

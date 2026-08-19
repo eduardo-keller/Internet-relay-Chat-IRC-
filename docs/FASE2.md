@@ -27,7 +27,7 @@ para ser defendida linha a linha na avaliação.
 | 4 | Caminho de escrita (`sendToClient` + `POLLOUT`) | truncagem em 510 e SendQ no `make test` | done |
 | 4.5 | Gancho de integração: seam de canal real | destrava os handlers do colega | done |
 | 5 | Despachante (parse, tabela, `421`, `451`) | `FOO` → 421, `JOIN` sem registro → 451 | done |
-| 6 | `PASS`/`NICK`/`USER` + rajada `001`–`004` | registro ponta a ponta pelo `nc` | todo |
+| 6 | `PASS`/`NICK`/`USER` + rajada `001`–`004` | registro ponta a ponta pelo `nc` | done |
 | 7 | `PING`/`PONG`, `QUIT`, `CAP` | `QUIT` colado com outra linha não quebra | todo |
 | 8 | Endurecimento e fechamento da fase | valgrind limpo, 50 clientes, `TASKS.md` | todo |
 
@@ -559,7 +559,7 @@ antes de rodar**: hoje ele pula com aviso, e volta a rodar sozinho quando o
 
 ### Passo 6 — `cmdPass` / `cmdNick` / `cmdUser` + rajada `001`–`004`
 
-**Status:** `todo`
+**Status:** `done` — 2026-08-18
 
 **Escrever:** `src/CommandsRegistration.cpp`. `461` sem parâmetros, `462`
 depois de registrado, `464` + desconexão com senha errada, `431`/`432`/`433` no
@@ -570,13 +570,36 @@ depois de registrado, `464` + desconexão com senha errada, `431`/`432`/`433` no
 tudo com `Server` e `Client` na pilha + `parseMessage`, verificando
 `getOutputBuffer()`:
 
-- [ ] senha errada → `464` **e** `isDisconnecting()`
-- [ ] `NICK` antes do `PASS` → `451` (vindo da porta do despachante)
-- [ ] alvo do numérico é `*` antes do registro e o nick depois
-- [ ] `USER` com 3 parâmetros → `461`
-- [ ] a rajada aparece uma única vez, na ordem `001 002 003 004`
-- [ ] segundo `PASS` depois de registrado → `462`
-- [ ] nick inválido (`~foo`, começando com dígito, > 30) → `432`
+- [x] senha errada → `464` **e** `isDisconnecting()`, com o `ERROR` atrás
+- [x] `NICK` antes do `PASS` → `451` — **mas não vindo do despachante**, ver a
+      correção abaixo
+- [x] alvo do numérico é `*` antes do registro e o nick depois
+- [x] `USER` com 3 parâmetros → `461`
+- [x] a rajada aparece uma única vez, na ordem `001 002 003 004`
+- [x] segundo `PASS` depois de registrado → `462` (e segundo `USER` também)
+- [x] nick inválido (`~foo`, começando com dígito, > 30) → `432`
+- [x] troca de nick depois de registrado transmite `:antigo!user@host NICK
+      :novo` com o prefixo **antigo**, sem repetir a rajada
+
+**CORREÇÃO DO PLANO: aquele `451` não pode vir da porta do despachante.** O
+`NICK` é justamente um dos seis comandos que a porta deixa passar — se ela o
+barrasse, ninguém conseguiria se registrar nunca. O `451` de "`NICK` antes do
+`PASS`" sai **do handler**, que é onde o `ARCHITECTURE.md` §7 o coloca, e a
+regra é do RFC 2812 §3.1.1: a senha tem de vir antes de qualquer tentativa de
+registro. É autorização antes de validação — `NICK` sem `PASS` nem chega a ser
+validado como nick.
+
+Uma consequência boa disso: como `NICK` e `USER` são recusados antes do `PASS`,
+**o `PASS` nunca pode ser o comando que completa o registro**. Por isso ele não
+chama o `completeRegistrationIfReady` — seria código morto fantasiado de rede de
+segurança.
+
+**Também entrou aqui, porque o `433` foi o primeiro a precisar:** o
+`findClientByNick`, que estava declarado no seam desde a Fase 0 e nunca tinha
+sido implementado. Ele é do contrato que a trilha DOMAIN também usa
+(`PRIVMSG` para usuário, `INVITE`, `KICK`). A comparação insensível a
+maiúsculas mora dentro dele, para nenhum chamador poder esquecer — e ele ignora
+clientes já marcados para desconexão, cujo nick está efetivamente livre.
 
 `433` é o único caso que um teste unitário não alcança de forma honesta: um nick
 duplicado exige dois clientes dentro de `Server::_clients`, e clientes só entram
@@ -596,9 +619,12 @@ printf 'PASS secret\r\nNICK alice\r\nUSER alice 0 * :Alice\r\n' | nc -C -q1 127.
 # 001, 002, 003, 004
 ```
 
-- [ ] `433` com duas conexões vivas, insensível a maiúsculas
-- [ ] `464` fecha a conexão
-- [ ] registro completo devolve `001`–`004`
+- [x] `433` com duas conexões vivas, insensível a maiúsculas
+- [x] `464` fecha a conexão
+- [x] registro completo devolve `001`–`004`
+- [x] tudo isso versionado em `tests/it/registration.sh` (8 casos), em vez de
+      comandos soltos para colar no terminal
+- [x] valgrind sobre registro, colisão, senha errada e troca de nick: limpo
 
 ---
 

@@ -18,6 +18,7 @@
 #include "Message.hpp"
 #include "Replies.hpp"
 #include "Server.hpp"
+#include "Utils.hpp"
 
 // The transport half of the server. See include/Server.hpp for the seam the
 // command handlers are allowed to use, and docs/FASE2.md for the order this
@@ -309,6 +310,36 @@ void	Server::acceptNewClient()
 	_clients[fd] = new Client(fd, hostname);
 	std::cout << "ircserv: accepted fd " << fd << " from " << hostname
 		<< std::endl;
+}
+
+// Part of the seam: the domain track needs it for PRIVMSG to a user, INVITE
+// and KICK, and the transport track for the 433 collision check.
+//
+// The comparison is CASE-INSENSITIVE and uses utils::equalsIgnoreCase, which
+// implements RFC 2812 section 2.2 — so alice and ALICE are the same person,
+// and so are nick[42] and nick{42}. Keeping that inside this function is what
+// stops any caller from getting it wrong.
+//
+// A linear scan over a map keyed by fd, on purpose: with a handful of clients
+// a second index keyed by nickname would be more state to keep in sync on
+// every NICK than it would ever save in lookups.
+Client	*Server::findClientByNick(const std::string &nickname)
+{
+	if (nickname.empty())
+		return (NULL);
+	for (std::map<int, Client *>::iterator it = _clients.begin();
+		it != _clients.end(); ++it)
+	{
+		// A client already marked for disconnection has effectively released
+		// its nickname — it is deleted at the end of this very poll iteration.
+		// Treating it as a holder would refuse a nick that is about to be free
+		// anyway, and would let a dying client block its own reconnect.
+		if (it->second->isDisconnecting())
+			continue ;
+		if (utils::equalsIgnoreCase(it->second->getNickname(), nickname))
+			return (it->second);
+	}
+	return (NULL);
 }
 
 Client	*Server::findClientByFd(int fd)
