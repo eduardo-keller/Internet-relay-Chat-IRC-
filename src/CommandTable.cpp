@@ -24,6 +24,10 @@ CommandTable	buildCommandTable()
 	table["PING"] = &cmdPing;
 	table["PONG"] = &cmdPong;
 	table["CAP"] = &cmdCap;
+	// Silent, like CAP END, and for the same reason: irssi sends both by
+	// itself once a channel has two people in it. See step 1.5 of FASE3.md.
+	table["WHO"] = &cmdWho;
+	table["WHOIS"] = &cmdWhois;
 
 	// --- DOMAIN (colega) ----------------------------------------------
 	// Uncomment each line as its handler gains a body in the domain track's

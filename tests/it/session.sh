@@ -84,6 +84,8 @@ check "PING devolve o mesmo token" \
 check "token com espacos volta inteiro" \
 	":ircserv PONG ircserv :two words" "$(talk 'PING :two words\r\n')"
 
+REG3='PASS secret\r\nNICK alice\r\nUSER alice 0 * :Alice\r\n'
+
 # 3. CAP IS ANSWERED WITH AN EMPTY CAPABILITY LIST (decision D17, which
 #    supersedes D2). This assertion used to say the opposite — "no reply and no
 #    error" — and it was green for the whole of phase 2. The first time irssi
@@ -109,6 +111,16 @@ check "abertura completa do irssi num pacote so: responde o CAP" \
 check "abertura completa do irssi num pacote so: registra" \
 	"001 002 003 004 " \
 	"$(printf '%s\n' "$OUT" | sed -n 's/^:ircserv \([0-9]*\) .*/\1/p' | tr '\n' ' ')"
+
+# 3.2 WHO and WHOIS are accepted and ignored, for the same reason as CAP: irssi
+#     sends both by itself once a channel has two people in it, and 421 in the
+#     status window is an error the subject forbids. Step 1.5 of FASE3.md.
+OUT=$(talk "$REG3"'WHO #test\r\nWHOIS alice\r\n')
+check "WHO e WHOIS nao respondem nada" \
+	"001 002 003 004 " \
+	"$(printf '%s\n' "$OUT" | sed -n 's/^:ircserv \([0-9]*\) .*/\1/p' | tr '\n' ' ')"
+check "e especificamente nao viram 421" \
+	"0" "$(printf '%s\n' "$OUT" | grep -c ' 421 ')"
 
 # 4. THE USE-AFTER-FREE CASE. Everything below arrives in ONE write: register,
 #    quit, and then a command that must never be dispatched.

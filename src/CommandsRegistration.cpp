@@ -256,6 +256,33 @@ void	cmdPing(Server &server, Client &sender, const Message &msg)
 		+ server.getServerName() + " :" + msg.params[0]);
 }
 
+// ACCEPTED AND IGNORED, both of them, and this is the CAP lesson arriving a
+// second time.
+//
+// irssi 1.4.5 sends "WHO <channel>" and "WHOIS <nick>" without being asked, as
+// soon as there is a second person in a channel — captured on the wire in
+// phase 3 step 1. Neither is in the subject's command list, and neither has
+// anything to answer from here: this server keeps no user database, no idle
+// times and no away state.
+//
+// So the choice is between 421 :Unknown command and nothing, and 421 puts an
+// error line in the status window of BOTH users in an ordinary two-person
+// session — which is the scenario the evaluation runs. The client displays
+// nothing either way, so silence costs the user nothing and costs us no
+// invented numerics.
+//
+// WHAT THIS PAIR REALLY DOCUMENTS is a measuring mistake. Step 0 captured a
+// single irssi against an empty channel, concluded that neither command was
+// ever sent, and wrote that into decision D15. Two clients in one channel
+// disproved it immediately. One client is not a sample of two.
+void	cmdWho(Server &, Client &, const Message &)
+{
+}
+
+void	cmdWhois(Server &, Client &, const Message &)
+{
+}
+
 void	cmdPong(Server &, Client &, const Message &)
 {
 	// Accepted and ignored, deliberately. A PONG is a client answering a PING

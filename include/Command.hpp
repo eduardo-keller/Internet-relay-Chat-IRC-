@@ -42,6 +42,13 @@ void	cmdPong(Server &server, Client &sender, const Message &msg);
 // client to connect "without encountering any error" — so this is a handler
 // that deliberately does nothing. Decision D2 in docs/FASE2.md.
 void	cmdCap(Server &server, Client &sender, const Message &msg);
+// WHO and WHOIS are not in the subject's command list either, and this server
+// has no user database to answer them from. They exist for the same reason CAP
+// does: irssi sends both ON ITS OWN as soon as a second person is in a channel,
+// and 421 in its status window is an error the subject forbids. Both are
+// deliberately silent. Step 1.5 in docs/FASE3.md.
+void	cmdWho(Server &server, Client &sender, const Message &msg);
+void	cmdWhois(Server &server, Client &sender, const Message &msg);
 
 // --- channels and messaging: DOMAIN track --------------------------------
 void	cmdJoin(Server &server, Client &sender, const Message &msg);

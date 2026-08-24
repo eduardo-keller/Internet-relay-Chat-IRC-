@@ -117,7 +117,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | 0.5 | `cmdCap` responde ao `CAP LS` (D17) | **o irssi completa o registro** — bloqueia toda a fase | **done** 2026-08-24 |
 | 0.6 | `cmdMode` mínimo: silêncio em alvo não-canal, consulta `324` | some o `MODE Unknown command`; sobra o `JOIN :` (D18, Passo 1) | **done** 2026-08-24 |
 | 1 | `cmdJoin` — canal novo, `JOIN`/`332`/`353`/`366` | `/join #test` abre a janela **com a lista de nicks** | **done** 2026-08-24 |
-| 1.5 | `WHO` / `WHOIS` — o `421` que só aparece com dois clientes | janela de status limpa numa sessão de duas pessoas | todo |
+| 1.5 | `WHO` / `WHOIS` — o `421` que só aparece com dois clientes | **duas janelas de status limpas; zero `421` no fio** | **done** 2026-08-24 |
 | 2 | `cmdJoin` — múltiplos canais e portões `+i`/`+k`/`+l` | `#a,#b key1,key2`; `473`/`475`/`471` | todo |
 | 3 | `cmdPart` | dois irssi, um sai, o outro vê; canal vazio some | todo |
 | 4 | `cmdPrivmsg` para canal | conversa entre dois irssi | todo |
@@ -409,6 +409,54 @@ exatamente o erro tentador —, três asserções falham, a do `403` incluída.
 > não afirmar limpeza sem ter olhado. Quem fecha isso é o **Passo 1**, com a
 > **D18**. O que o 0.6 entrega é uma das duas linhas de erro, e a certeza de
 > qual é a outra.
+
+---
+
+## 5.3 Passo 1.5 — `WHO` e `WHOIS`: o erro que só aparece em dupla
+
+**Concluído em 2026-08-24.** Dois handlers vazios, `cmdWho` e `cmdWhois`,
+registrados na tabela — a mesma forma do `CAP END`, e pelo mesmo motivo.
+
+### Por que existe
+
+O irssi 1.4.5 manda `WHO <canal>` e `WHOIS <nick>` **sem ninguém pedir**, assim
+que há uma segunda pessoa num canal. Nenhum dos dois está na lista do subject, e
+nenhum dos dois tem o que responder aqui: este servidor não guarda base de
+usuários, tempo ocioso nem estado de ausência.
+
+Então a escolha era entre `421 :Unknown command` e nada — e o `421` põe uma
+linha de erro na janela de status **dos dois** usuários numa sessão comum de
+duas pessoas, que é exatamente o cenário da avaliação. O cliente não mostra
+nada de um jeito nem do outro, então o silêncio não custa nada ao usuário e não
+nos custa numerics inventados.
+
+Alternativa considerada e recusada: responder `352`/`315` e `311`/`318` de
+verdade. Faria `/who` e `/whois` funcionarem, mas custa quatro numerics novos
+na tabela do `ARCHITECTURE.md` §6 para comandos fora do escopo obrigatório.
+
+### O que este passo realmente documenta
+
+**Um erro de medição.** O Passo 0 capturou **um** irssi contra um canal vazio,
+não viu `WHO` nem `WHOIS`, e escreveu isso na D15 como se fosse a lista
+completa. Dois clientes num canal desmentiram na primeira tentativa.
+
+Uma amostra de um cliente não descreve o comportamento de dois. É a mesma lição
+da D2, e a segunda vez que ela aparece nesta fase.
+
+### Prova
+
+Duas sessões irssi, cada uma com perfil próprio, ambas em `#test`:
+
+```
+2  C->S  WHO #test
+1  C->S  WHOIS edu_k
+```
+
+e no fio inteiro, **zero `421`**. As duas janelas de status ficam com o burst
+de boas-vindas e nada mais.
+
+**O item 1 do `PLANO.md` §3 Fase 3 — "registrar no irssi" — está cumprido de
+verdade, com dois clientes e sem uma linha de erro.**
 
 ---
 

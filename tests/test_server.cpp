@@ -268,8 +268,13 @@ static void	testCommandTable(void)
 	check(table.find("JOIN") != table.end(), "table: JOIN is registered");
 	check(table.find("PART") == table.end(),
 		"table: PART is not wired up yet");
-	check(table.size() == 9,
-		"table: the seven transport commands, plus MODE and JOIN");
+	// WHO and WHOIS are registered for the same reason CAP is: irssi sends
+	// them by itself, and 421 in its status window is an error the subject
+	// forbids. See step 1.5 of docs/FASE3.md.
+	check(table.find("WHO") != table.end(), "table: WHO is registered");
+	check(table.find("WHOIS") != table.end(), "table: WHOIS is registered");
+	check(table.size() == 11,
+		"table: seven transport commands, MODE, JOIN, WHO and WHOIS");
 }
 
 void	runServerTests(void)

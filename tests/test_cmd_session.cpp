@@ -30,6 +30,10 @@ static void	feed(Server &server, Client &client, const std::string &line)
 		cmdQuit(server, client, msg);
 	else if (msg.command == "CAP")
 		cmdCap(server, client, msg);
+	else if (msg.command == "WHO")
+		cmdWho(server, client, msg);
+	else if (msg.command == "WHOIS")
+		cmdWhois(server, client, msg);
 }
 
 static void	testPing(void)
@@ -187,10 +191,49 @@ static void	testQuit(void)
 		"and does not queue a second ERROR");
 }
 
+// WHO AND WHOIS ARE ACCEPTED AND IGNORED, and the reason is the CAP lesson a
+// second time. Neither is in the subject's command list, and this server has no
+// user database to answer them from — but irssi 1.4.5 sends "WHO <channel>"
+// and "WHOIS <nick>" ON ITS OWN as soon as there is a second person in a
+// channel, and 421 :Unknown command puts an error line in the status window of
+// both users. The subject requires the reference client to connect without
+// encountering any error.
+//
+// Measured in phase 3 step 1: this only shows up with TWO clients. The single
+// -client capture of step 0 never triggered it, which is exactly why decision
+// D15 was wrong the first time it was written down.
+//
+// Silence is the whole implementation. Answering with an invented 352 or 315
+// would mean putting numerics in the table that nothing else uses, and the
+// client shows nothing either way.
+static void	testWhoAndWhoisAreSilent(void)
+{
+	Server	server(6667, "secret");
+	Client	client(-1, "localhost");
+
+	client.setNickname("alice");
+
+	feed(server, client, "WHO #room");
+	checkEqual(client.getOutputBuffer(), "",
+		"WHO is accepted and ignored — irssi sends it unprompted");
+
+	feed(server, client, "WHOIS bob");
+	checkEqual(client.getOutputBuffer(), "",
+		"WHOIS likewise");
+
+	// No parameter must not read past the vector, same trap as a bare CAP.
+	feed(server, client, "WHO");
+	feed(server, client, "WHOIS");
+	checkEqual(client.getOutputBuffer(), "",
+		"neither reads past its parameters when given none");
+	check(!client.isDisconnecting(), "and neither disconnects anybody");
+}
+
 void	runCommandSessionTests(void)
 {
 	testPing();
 	testPongIsSilent();
 	testCapNegotiation();
+	testWhoAndWhoisAreSilent();
 	testQuit();
 }
