@@ -434,6 +434,255 @@ static void	testNamesReplySplitsOverManyLines(void)
 	check(allFit, "and no single line exceeded 510 bytes before its CRLF");
 }
 
+// --- step 2: several channels at once, and the mode gates -----------------
+
+static void	testJoinSeveralChannels(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+	feed(server, alice, "JOIN #a,#b");
+
+	Channel	*a = server.findChannel("#a");
+	Channel	*b = server.findChannel("#b");
+
+	check(a != NULL && b != NULL, "both channels are created");
+	// GUARDED, because a failing check must fail rather than crash: until the
+	// list is split, findChannel returns NULL here and a bare -> would take
+	// the whole test binary down with it.
+	check(a != NULL && b != NULL && a->isMember(&alice) && b->isMember(&alice),
+		"and the sender is in both");
+	check(countOf(alice.getOutputBuffer(), " 366 ") == 2,
+		"each channel gets its own complete entry sequence");
+
+	// One bad name does not stop the rest of the list. The client asked for
+	// two things; failing both because one was wrong would be worse service
+	// than the error itself.
+	Client	bob(-1, "localhost");
+
+	makeUser(bob, "bob");
+	feed(server, bob, "JOIN &nope,#good");
+	check(contains(bob.getOutputBuffer(), " 403 bob &nope "),
+		"the invalid name in the list is refused");
+	check(server.findChannel("#good") != NULL
+		&& server.findChannel("#good")->isMember(&bob),
+		"and the valid one is still joined");
+
+	// An EMPTY FIELD is skipped in silence, for the same reason a lone empty
+	// parameter is (D18): it names no channel, and split keeps it only so that
+	// the key list stays aligned.
+	Client	carol(-1, "localhost");
+
+	makeUser(carol, "carol");
+	feed(server, carol, "JOIN #x,,#y");
+	check(countOf(carol.getOutputBuffer(), " 366 ") == 2,
+		"an empty field between two names joins the two");
+	check(countOf(carol.getOutputBuffer(), " 403 ") == 0,
+		"and says nothing about the empty one");
+}
+
+// KEYS ARE POSITIONAL, and this is the reason utils::split preserves empty
+// fields (see the comment on it in src/Utils.cpp). "JOIN #a,#b ,key2" gives
+// #a no key and #b the key; collapse that empty field and key2 lands on #a —
+// the user is refused entry to one channel and hands its key to another.
+static void	testJoinKeysArePositional(void)
+{
+	Server	server(6667, "secret");
+	Client	setup(-1, "localhost");
+
+	makeUser(setup, "setup");
+
+	Channel	*first = server.getOrCreateChannel("#first");
+	Channel	*second = server.getOrCreateChannel("#second");
+
+	first->addMember(&setup);
+	second->addMember(&setup);
+	first->setKey("chave1");
+	second->setKey("chave2");
+
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+	feed(server, alice, "JOIN #first,#second chave1,chave2");
+	check(first->isMember(&alice) && second->isMember(&alice),
+		"matching keys in order open both channels");
+
+	// The same two channels, keys swapped: both must be refused.
+	Client	bob(-1, "localhost");
+
+	makeUser(bob, "bob");
+	feed(server, bob, "JOIN #first,#second chave2,chave1");
+	check(countOf(bob.getOutputBuffer(), " 475 ") == 2,
+		"swapped keys are refused on both channels");
+	check(!first->isMember(&bob) && !second->isMember(&bob),
+		"and neither was joined");
+
+	// The empty-field case itself: no key for the first, a key for the second.
+	Channel	*open = server.getOrCreateChannel("#open");
+
+	open->addMember(&setup);
+
+	Client	carol(-1, "localhost");
+
+	makeUser(carol, "carol");
+	feed(server, carol, "JOIN #open,#second ,chave2");
+	check(open->isMember(&carol),
+		"the keyless channel is joined with an empty key field");
+	check(second->isMember(&carol),
+		"and the key still lands on the SECOND channel, not the first");
+}
+
+static void	testJoinKeyGate(void)
+{
+	Server	server(6667, "secret");
+	Client	owner(-1, "localhost");
+
+	makeUser(owner, "owner");
+	feed(server, owner, "JOIN #locked");
+
+	Channel	*channel = server.findChannel("#locked");
+
+	channel->setKey("segredo");
+
+	Client	nokey(-1, "localhost");
+
+	makeUser(nokey, "nokey");
+	feed(server, nokey, "JOIN #locked");
+	check(contains(nokey.getOutputBuffer(),
+			" 475 nokey #locked :Cannot join channel (+k)"),
+		"no key at all is 475");
+	check(!channel->isMember(&nokey), "and does not get in");
+
+	Client	wrong(-1, "localhost");
+
+	makeUser(wrong, "wrong");
+	feed(server, wrong, "JOIN #locked outra");
+	check(contains(wrong.getOutputBuffer(), " 475 "), "a wrong key is 475");
+
+	Client	right(-1, "localhost");
+
+	makeUser(right, "right");
+	feed(server, right, "JOIN #locked segredo");
+	check(channel->isMember(&right), "the right key gets in");
+	check(!channel->isOperator(&right),
+		"and joining with a key does not make anyone an operator");
+}
+
+static void	testJoinInviteGate(void)
+{
+	Server	server(6667, "secret");
+	Client	owner(-1, "localhost");
+
+	makeUser(owner, "owner");
+	feed(server, owner, "JOIN #private");
+
+	Channel	*channel = server.findChannel("#private");
+
+	channel->setInviteOnly(true);
+
+	Client	stranger(-1, "localhost");
+
+	makeUser(stranger, "stranger");
+	feed(server, stranger, "JOIN #private");
+	check(contains(stranger.getOutputBuffer(),
+			" 473 stranger #private :Cannot join channel (+i)"),
+		"an uninvited client is 473");
+	check(!channel->isMember(&stranger), "and stays out");
+
+	Client	guest(-1, "localhost");
+
+	makeUser(guest, "guest");
+	channel->addInvite(&guest);
+	feed(server, guest, "JOIN #private");
+	check(channel->isMember(&guest), "an invited client gets in");
+
+	// THE INVITE IS CONSUMED. It is a single-use pass: leaving and walking
+	// back in without a fresh invite must fail, or +i means nothing after the
+	// first visit.
+	check(!channel->isInvited(&guest),
+		"and the invitation is spent on the way in");
+}
+
+static void	testJoinLimitGate(void)
+{
+	Server	server(6667, "secret");
+	Client	owner(-1, "localhost");
+	Client	second(-1, "localhost");
+
+	makeUser(owner, "owner");
+	makeUser(second, "second");
+	feed(server, owner, "JOIN #small");
+	feed(server, second, "JOIN #small");
+
+	Channel	*channel = server.findChannel("#small");
+
+	channel->setUserLimit(2);
+
+	Client	late(-1, "localhost");
+
+	makeUser(late, "late");
+	feed(server, late, "JOIN #small");
+	check(contains(late.getOutputBuffer(),
+			" 471 late #small :Cannot join channel (+l)"),
+		"a full channel is 471");
+	check(!channel->isMember(&late), "and the latecomer stays out");
+
+	// The limit is a ceiling on members, not on attempts: raise it and the
+	// same client walks in.
+	channel->setUserLimit(3);
+	feed(server, late, "JOIN #small");
+	check(channel->isMember(&late), "raising the limit lets them in");
+}
+
+// THE ORDER OF THE GATES IS A DECISION, not an accident, so it is locked here.
+// A channel can be +i and +k at once, and only one numeric comes back.
+static void	testGateOrder(void)
+{
+	Server	server(6667, "secret");
+	Client	owner(-1, "localhost");
+
+	makeUser(owner, "owner");
+	feed(server, owner, "JOIN #fort");
+
+	Channel	*channel = server.findChannel("#fort");
+
+	channel->setInviteOnly(true);
+	channel->setKey("segredo");
+	channel->setUserLimit(1);
+
+	Client	nobody(-1, "localhost");
+
+	makeUser(nobody, "nobody");
+	feed(server, nobody, "JOIN #fort");
+	check(contains(nobody.getOutputBuffer(), " 473 "),
+		"invite-only is reported first: 473 before 475 and 471");
+	check(countOf(nobody.getOutputBuffer(), " 475 ") == 0
+		&& countOf(nobody.getOutputBuffer(), " 471 ") == 0,
+		"and only one numeric comes back, not three");
+
+	// AN INVITE OPENS +i AND NOTHING ELSE. It is not a master key: the channel
+	// key still has to be produced.
+	Client	guest(-1, "localhost");
+
+	makeUser(guest, "guest");
+	channel->addInvite(&guest);
+	feed(server, guest, "JOIN #fort");
+	check(contains(guest.getOutputBuffer(), " 475 "),
+		"an invited client without the key is still 475");
+	check(channel->isInvited(&guest),
+		"and the invitation is NOT spent by a failed attempt");
+
+	// With the key as well, only the limit is left — and it is full.
+	feed(server, guest, "JOIN #fort segredo");
+	check(contains(guest.getOutputBuffer(), " 471 "),
+		"key accepted, limit still refuses: 471 is the last gate");
+
+	channel->setUserLimit(5);
+	feed(server, guest, "JOIN #fort segredo");
+	check(channel->isMember(&guest), "with all three satisfied, they get in");
+}
+
 void	runCommandChannelTests(void)
 {
 	testModeErrors();
@@ -446,4 +695,10 @@ void	runCommandChannelTests(void)
 	testJoinExistingChannel();
 	testJoinIsIdempotentAndCaseInsensitive();
 	testNamesReplySplitsOverManyLines();
+	testJoinSeveralChannels();
+	testJoinKeysArePositional();
+	testJoinKeyGate();
+	testJoinInviteGate();
+	testJoinLimitGate();
+	testGateOrder();
 }

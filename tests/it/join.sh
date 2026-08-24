@@ -150,6 +150,39 @@ sleep 1
 check "nenhum JOIN extra chegou a ana" \
 	"$BEFORE" "$(grep -c 'JOIN #sala' "$OUTA")"
 
+# 5. SEVERAL CHANNELS AT ONCE, with positional keys. This is the shape that
+#    makes utils::split preserve empty fields: with ",chave" the first channel
+#    has no key and the second one does. Collapse that empty field and the key
+#    lands on the wrong channel — the user is refused entry to one and hands
+#    its key to another.
+OUT=$(talk "$REG"'JOIN #um,#dois\r\n')
+check "JOIN #um,#dois entra nos dois" \
+	"2" "$(printf '%s\n' "$OUT" | grep -c ' 366 alice ')"
+
+#    THE +i/+k/+l GATES ARE NOT REACHABLE FROM HERE YET, and it is worth being
+#    explicit about why rather than leaving a gap: over a socket the only way to
+#    put a mode on a channel is MODE, and cmdMode still refuses every change
+#    until steps 9 to 12. The gates themselves are covered in
+#    tests/test_cmd_channel.cpp, where the Channel API sets the modes directly;
+#    they come back here as end-to-end cases once MODE can set them.
+#
+#    What IS reachable is the neighbouring case: a key offered to a channel that
+#    has none is simply ignored, not an error.
+check "chave enviada para canal sem chave e ignorada" \
+	"1" "$(talk "$REG"'JOIN #um chaveinutil\r\n' | grep -c ' 366 alice #um ')"
+
+check "nome invalido no meio da lista nao impede os outros" \
+	"1" "$(talk "$REG"'JOIN &mau,#bom\r\n' | grep -c ' 366 alice #bom ')"
+check "e o invalido leva 403" \
+	"1" "$(talk "$REG"'JOIN &mau2,#bom\r\n' | grep -c ' 403 alice &mau2 ')"
+
+#    An empty field in the middle names no channel: silence, not 403.
+OUT=$(talk "$REG"'JOIN #p,,#q\r\n')
+check "campo vazio no meio da lista entra nos dois vizinhos" \
+	"2" "$(printf '%s\n' "$OUT" | grep -c ' 366 alice ')"
+check "e nao gera 403 pelo campo vazio" \
+	"0" "$(printf '%s\n' "$OUT" | grep -c ' 403 ')"
+
 kill -0 "$SRV" 2>/dev/null && ALIVE=vivo || ALIVE=MORTO
 check "servidor continua vivo no fim" "vivo" "$ALIVE"
 

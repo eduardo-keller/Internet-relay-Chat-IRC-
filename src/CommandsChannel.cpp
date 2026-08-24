@@ -1,5 +1,6 @@
 #include <set>
 #include <string>
+#include <vector>
 
 #include "Channel.hpp"
 #include "Client.hpp"
@@ -80,21 +81,57 @@ static void	sendNamesReply(Server &server, Client &sender, Channel &channel)
 		server.sendToClient(sender, head + names);
 }
 
-// JOIN — one channel, no key and no mode checks. Step 1 of docs/FASE3.md;
-// multiple channels and the +i/+k/+l gates arrive in step 2.
-void	cmdJoin(Server &server, Client &sender, const Message &msg)
+// The mode gates, in a fixed order, for ONE channel. Returns false when the
+// client must be kept out, having already been told why.
+//
+// THE ORDER IS +i, THEN +k, THEN +l, and it is a decision rather than an
+// accident: a channel can have all three set, only one numeric may come back,
+// and the one that comes back should be the most specific reason. Invite-only
+// is a statement about *who* may enter, so it outranks a key the client could
+// have supplied and a limit that will change on its own. It is also the order
+// the deployed servers use.
+//
+// AN INVITE OPENS +i AND NOTHING ELSE. It is not a master key: an invited
+// client still produces the channel key and still waits for a seat. Treating an
+// invitation as a bypass for all three would make +k unenforceable, since any
+// operator could hand out entry to a keyed channel without the key.
+static bool	passesModeGates(Server &server, Client &sender, Channel &channel,
+				const std::string &key)
 {
-	if (msg.params.empty())
+	const std::string	&name = channel.getName();
+	const std::string	&nick = sender.getNickname();
+
+	if (channel.isInviteOnly() && !channel.isInvited(&sender))
 	{
 		server.sendToClient(sender, irc::numeric(server.getServerName(),
-				irc::ERR_NEEDMOREPARAMS, sender.getNickname(),
-				"JOIN :Not enough parameters"));
-		return ;
+				irc::ERR_INVITEONLYCHAN, nick,
+				name + " :Cannot join channel (+i)"));
+		return (false);
 	}
+	if (channel.hasKey() && key != channel.getKey())
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_BADCHANNELKEY, nick,
+				name + " :Cannot join channel (+k)"));
+		return (false);
+	}
+	// >= because the limit counts the members already in: a channel of two with
+	// a limit of two is full, and the third would make three.
+	if (channel.hasUserLimit() && channel.memberCount() >= channel.getUserLimit())
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_CHANNELISFULL, nick,
+				name + " :Cannot join channel (+l)"));
+		return (false);
+	}
+	return (true);
+}
 
-	const std::string	&name = msg.params[0];
-
-	// AN EMPTY CHANNEL LIST IS SILENCE, NOT AN ERROR — decision D18.
+// Everything that happens for one channel of a JOIN list.
+static void	joinOneChannel(Server &server, Client &sender,
+				const std::string &name, const std::string &key)
+{
+	// AN EMPTY NAME IS SILENCE, NOT AN ERROR — decision D18.
 	//
 	// irssi 1.4.5 sends a bare "JOIN :" on its own on every single connection,
 	// before it has even finished CAP negotiation. It was captured on the wire
@@ -103,9 +140,13 @@ void	cmdJoin(Server &server, Client &sender, const Message &msg)
 	// status window of everybody who connects, and the subject requires the
 	// reference client to connect "without encountering any error".
 	//
-	// Note what this does NOT do: JOIN with no parameter at all is still 461
-	// above. That form is a typo at an nc prompt, not something any client
-	// sends, and answering it is how the user learns what they got wrong.
+	// The same answer covers an empty FIELD inside a list — "JOIN #a,,#b". It
+	// names no channel either, and split only keeps it so that the key list
+	// stays aligned.
+	//
+	// Note what this does NOT do: JOIN with no parameter at all is still 461,
+	// in cmdJoin below. That form is a typo at an nc prompt, not something any
+	// client sends, and answering it is how the user learns what they got wrong.
 	if (name.empty())
 		return ;
 
@@ -117,22 +158,35 @@ void	cmdJoin(Server &server, Client &sender, const Message &msg)
 		return ;
 	}
 
-	Channel	*channel = server.getOrCreateChannel(name);
+	Channel	*channel = server.findChannel(name);
 
-	// Already in it: say nothing. Replaying the whole JOIN sequence would make
-	// irssi redraw the channel and re-announce the arrival to everyone else.
-	if (channel->isMember(&sender))
-		return ;
-
-	// ASKED BEFORE THE MEMBER IS ADDED, because "is this channel new?" is
-	// exactly "was it empty a moment ago?". getOrCreateChannel may have just
-	// created it, and an existing channel is never empty — the sweep in
-	// reapDisconnected deletes a channel as soon as its last member leaves.
-	const bool	isNewChannel = channel->isEmpty();
-
-	channel->addMember(&sender);
-	if (isNewChannel)
+	// AN EXISTING CHANNEL IS GATED; A NEW ONE CANNOT BE. Looking it up rather
+	// than creating it straight away is what keeps a refused JOIN from leaving
+	// an empty channel behind — getOrCreateChannel would have made one before
+	// passesModeGates ever ran, and nothing would clean it up.
+	if (channel != NULL)
+	{
+		// Already in it: say nothing. Replaying the whole sequence would make
+		// irssi redraw the channel and re-announce the arrival to everyone.
+		if (channel->isMember(&sender))
+			return ;
+		if (!passesModeGates(server, sender, *channel, key))
+			return ;
+		channel->addMember(&sender);
+		// THE INVITE IS SPENT ON THE WAY IN, and only on the way in. A single
+		// use is what makes +i mean anything after the first visit; consuming
+		// it on a REFUSED attempt would instead let a wrong key burn someone
+		// else's invitation.
+		channel->removeInvite(&sender);
+	}
+	else
+	{
+		// A channel that did not exist has no modes to check, and its creator
+		// becomes its operator.
+		channel = server.getOrCreateChannel(name);
+		channel->addMember(&sender);
 		channel->addOperator(&sender);
+	}
 
 	// The order below is the contract (ARCHITECTURE.md section 6), and getting
 	// it wrong is the usual reason a channel window opens empty in irssi.
@@ -158,6 +212,50 @@ void	cmdJoin(Server &server, Client &sender, const Message &msg)
 	server.sendToClient(sender, irc::numeric(server.getServerName(),
 			irc::RPL_ENDOFNAMES, sender.getNickname(),
 			channel->getName() + " :End of /NAMES list"));
+}
+
+// JOIN <channel>{,<channel>} [<key>{,<key>}]
+//
+// KEYS ARE POSITIONAL: the nth key belongs to the nth channel, and a channel
+// with no key of its own is written as an empty field. That is precisely why
+// utils::split preserves empty fields — "JOIN #a,#b ,key2" must give #a no key
+// and #b the key. Collapse that empty field and the list becomes ["key2"],
+// which then lands on #a: the user is refused entry to one channel and hands
+// its key to another.
+//
+// Each channel is processed independently. One bad name does not cancel the
+// rest: the client asked for several things, and failing all of them because
+// one was wrong is worse service than the error itself.
+void	cmdJoin(Server &server, Client &sender, const Message &msg)
+{
+	if (msg.params.empty())
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NEEDMOREPARAMS, sender.getNickname(),
+				"JOIN :Not enough parameters"));
+		return ;
+	}
+
+	const std::vector<std::string>	names = utils::split(msg.params[0], ',');
+	std::vector<std::string>		keys;
+
+	if (msg.params.size() > 1)
+		keys = utils::split(msg.params[1], ',');
+
+	for (std::vector<std::string>::size_type i = 0; i < names.size(); ++i)
+	{
+		// Fewer keys than channels is normal and legal: the channels past the
+		// end of the key list simply have none.
+		const std::string	key = (i < keys.size()) ? keys[i] : std::string();
+
+		// THE DISCONNECT CHECK IS NOT DECORATION. sendToClient can overflow a
+		// client's SendQ, which marks it for disconnection, and this loop may
+		// still have five channels to go. Carrying on would keep queueing onto
+		// a client that is being reaped at the end of this poll iteration.
+		if (sender.isDisconnecting())
+			return ;
+		joinOneChannel(server, sender, names[i], key);
+	}
 }
 
 // MODE, in the smallest form that keeps irssi's status window clean.

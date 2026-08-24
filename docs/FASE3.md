@@ -103,6 +103,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | D13 | `PRIVMSG` para canal de quem não é membro | `404 ERR_CANNOTSENDTOCHAN`. Não implementamos `+n`, mas deixar um estranho falar num canal em que não está é pior do que recusar, e o `404` já está na tabela | aceita 2026-08-24 |
 | D14 | `JOIN 0` (sair de todos os canais) | **Não implementado.** `0` reprova em `isValidChannelName` e ganha `403 ERR_NOSUCHCHANNEL`. Está fora da lista do subject, e o irssi manda `PART` explícito | aceita 2026-08-24 |
 | D15 | `WHO` / `WHOIS` / outros que o irssi mandar sozinho | **CORRIGIDA no Passo 1 — a primeira versão estava errada.** O irssi 1.4.5 manda sozinho: `CAP LS 302`, **`JOIN :`** (lista vazia, antes até do `CAP END`), `CAP END`, `PASS`, `NICK`, `USER`, `MODE <nick> +i`, `MODE <canal>` após cada `JOIN`, `PING` no timer — **e também `WHO <canal>` e `WHOIS <nick>`**. A captura do Passo 0 tinha **um cliente só e um canal vazio**, e nessas condições o `WHO`/`WHOIS` não aparece; com dois clientes num canal, aparece, e vira `421 :Unknown command` na janela de status dos dois. Uma amostra de um cliente não descreve o comportamento de dois — a lição a levar para o Passo 13. Tratamento pendente: **Passo 1.5** | corrigida 2026-08-24 |
+| D19 | Ordem dos portões do `JOIN`, e o alcance do convite | **`+i` → `+k` → `+l`**: um canal pode ter os três, só um numeric volta, e o que volta deve ser a razão mais específica. `+i` é uma afirmação sobre *quem* entra, então vem antes de uma chave que o cliente poderia ter mandado e de um limite que muda sozinho — é também a ordem dos servidores implantados. **O convite abre o `+i` e mais nada:** quem foi convidado ainda apresenta a chave e ainda espera vaga, senão qualquer operador poderia dar entrada num canal com chave sem saber a chave. O convite é gasto **só na entrada bem-sucedida**; gastá-lo numa tentativa recusada deixaria uma chave errada queimar o convite de alguém | aceita 2026-08-24 |
 | D18 | `JOIN` com lista de canais **vazia** (`JOIN :`) | **Silêncio**, sem numeric. O irssi manda essa linha sozinho em toda conexão — confirmado com perfil recém-criado, e visível também na captura contra o servidor-mock, então não é resíduo de configuração. `403` ou `461` ali poriam uma linha de erro na janela de status de todo mundo que conecta, que é o que o subject proíbe. **`JOIN` sem parâmetro nenhum continua `461`**: essa forma nenhum cliente manda, e é erro de quem digita no `nc`. A assimetria é medida, não inventada | aceita 2026-08-24 |
 | D16 | Tamanho de tópico | Sem constante nova em `Limits.hpp`. O único teto é a truncagem em 510 do `sendToClient`, que já cobre o caso do prefixo empurrar a linha para fora do limite | aceita 2026-08-24 |
 | D17 | **`CAP` tem de responder — revoga a D2** | O irssi 1.4.5 **bloqueia o registro** esperando resposta ao `CAP LS`: com o handler silencioso da D2 ele nunca manda `PASS`/`NICK`/`USER` e o cliente de referência jamais conecta. `cmdCap` passa a responder `:ircserv CAP * LS :` (lista de capacidades **vazia**), ao que o irssi responde `CAP END` e segue o registro normalmente. `CAP REQ` → `NAK`; `CAP END` e qualquer outro subcomando → silêncio. A **motivação** da D2 continua de pé (nada de `421`, que polui a janela de status); o que estava errado era achar que silêncio bastava | aceita 2026-08-24, medida |
@@ -118,7 +119,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | 0.6 | `cmdMode` mínimo: silêncio em alvo não-canal, consulta `324` | some o `MODE Unknown command`; sobra o `JOIN :` (D18, Passo 1) | **done** 2026-08-24 |
 | 1 | `cmdJoin` — canal novo, `JOIN`/`332`/`353`/`366` | `/join #test` abre a janela **com a lista de nicks** | **done** 2026-08-24 |
 | 1.5 | `WHO` / `WHOIS` — o `421` que só aparece com dois clientes | **duas janelas de status limpas; zero `421` no fio** | **done** 2026-08-24 |
-| 2 | `cmdJoin` — múltiplos canais e portões `+i`/`+k`/`+l` | `#a,#b key1,key2`; `473`/`475`/`471` | todo |
+| 2 | `cmdJoin` — múltiplos canais e portões `+i`/`+k`/`+l` | `/join #a,#b` abre **duas** janelas; `473`/`475`/`471` | **done** 2026-08-24 |
 | 3 | `cmdPart` | dois irssi, um sai, o outro vê; canal vazio some | todo |
 | 4 | `cmdPrivmsg` para canal | conversa entre dois irssi | todo |
 | 5 | `cmdPrivmsg` para usuário | `/msg bob oi` abre janela no bob | todo |
@@ -577,12 +578,14 @@ Itens do `TASKS.md`: `cmdJoin — canal novo` e `cmdJoin — sequência`.
   preserva campo vazio. `JOIN #a,#b ,key2` dá chave só ao `#b`;
 - cada canal é processado de forma independente: um `403` num não impede a
   entrada nos outros;
-- portões, **antes** do `addMember` e nesta ordem:
-  - `+k` e chave errada ou ausente → `475 ERR_BADCHANNELKEY`;
+- portões, **antes** do `addMember`, na ordem **`+i` → `+k` → `+l`** (D19):
   - `+i` e não convidado → `473 ERR_INVITEONLYCHAN`;
+  - `+k` e chave errada ou ausente → `475 ERR_BADCHANNELKEY`;
   - `+l` e `memberCount() >= limite` → `471 ERR_CHANNELISFULL`;
-- entrada por convite **consome o convite**: `removeInvite` no sucesso;
-- um canal criado agora nunca tem modo, então o caminho de criação não muda.
+- entrada por convite **consome o convite**, e só no sucesso;
+- um canal criado agora nunca tem modo, então o caminho de criação não muda —
+  e é por isso que ele usa `findChannel` antes de `getOrCreateChannel`: criar
+  primeiro deixaria um canal vazio para trás toda vez que um portão recusasse.
 
 ### Testes de unidade
 
@@ -604,11 +607,18 @@ Os modos são ligados direto pela API do `Channel` (`setInviteOnly`, `setKey`,
 
 Estende `tests/it/join.sh` com o caso multi-canal e um `475`.
 
-### Pronto quando
+### Pronto quando — cumprido em 2026-08-24
 
-`make test` verde e `/join #a,#b` no irssi abre **duas** janelas.
+`make test` em **482 asserções**, `tests/it/join.sh` com 21 casos, e no irssi
+`/join #alpha,#beta` abre **duas** janelas, cada uma com a sequência completa e
+sem um único `421` ou `403` no fio.
 
-Itens do `TASKS.md`: `cmdJoin — múltiplos canais` e `cmdJoin — +i/+k/+l`.
+> **Limite honesto deste passo:** os portões `+i`/`+k`/`+l` são provados em
+> teste de unidade, onde os modos são ligados direto pela API do `Channel`.
+> **Não** há como exercitá-los ponta a ponta ainda: pelo socket, o único jeito
+> de pôr um modo num canal é o `MODE`, e o `cmdMode` recusa toda alteração até
+> os passos 9 a 12. Está anotado dentro do `join.sh`, e volta para lá como caso
+> de integração quando o `MODE` souber ligar os modos.
 
 ---
 
