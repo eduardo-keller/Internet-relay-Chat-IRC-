@@ -102,7 +102,8 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | D12 | Parâmetro ruim de modo | **Ausente** em `+k`/`+l`/`+o` → `461 ERR_NEEDMOREPARAMS`. **Presente mas inválido** em `+l` (não numérico, ou `<= 0`) → a flag é **ignorada em silêncio**, sem numeric: não existe código na tabela para "parâmetro absurdo", e inventar um é proibido pelo `ARCHITECTURE.md` §10 | aceita 2026-08-24 |
 | D13 | `PRIVMSG` para canal de quem não é membro | `404 ERR_CANNOTSENDTOCHAN`. Não implementamos `+n`, mas deixar um estranho falar num canal em que não está é pior do que recusar, e o `404` já está na tabela | aceita 2026-08-24 |
 | D14 | `JOIN 0` (sair de todos os canais) | **Não implementado.** `0` reprova em `isValidChannelName` e ganha `403 ERR_NOSUCHCHANNEL`. Está fora da lista do subject, e o irssi manda `PART` explícito | aceita 2026-08-24 |
-| D15 | `WHO` / `WHOIS` / outros que o irssi mandar sozinho | **RESOLVIDA no Passo 0, com o fio capturado.** O irssi 1.4.5 manda sozinho exatamente isto: `CAP LS 302`, `CAP END`, `PASS`, `NICK`, `USER`, `MODE <nick> +i` e, depois de cada `JOIN`, `MODE <canal>`. **Não manda `WHO` nem `WHOIS`.** Portanto nenhum handler no-op novo é preciso — mas `cmdMode` ganha duas obrigações que não estavam no `TASKS.md`: responder à consulta `MODE <canal>` (`324`, já previsto no Passo 9) e **ignorar em silêncio** um `MODE` cujo alvo não é canal. Verificado: sem resposta ao `MODE edu_k +i`, a janela de status fica limpa | aceita 2026-08-24 |
+| D15 | `WHO` / `WHOIS` / outros que o irssi mandar sozinho | **RESOLVIDA no Passo 0, com o fio capturado.** O irssi 1.4.5 manda sozinho exatamente isto: `CAP LS 302`, **`JOIN :`** (lista de canais **vazia**, antes até do `CAP END`), `CAP END`, `PASS`, `NICK`, `USER`, `MODE <nick> +i` e, depois de cada `JOIN`, `MODE <canal>`. **Não manda `WHO` nem `WHOIS`.** Portanto nenhum handler no-op novo é preciso — mas `cmdMode` ganha duas obrigações que não estavam no `TASKS.md` (consulta `324` e silêncio em alvo não-canal), e o `cmdJoin` ganha a D18 | aceita 2026-08-24 |
+| D18 | `JOIN` com lista de canais **vazia** (`JOIN :`) | **Silêncio**, sem numeric. O irssi manda essa linha sozinho em toda conexão — confirmado com perfil recém-criado, e visível também na captura contra o servidor-mock, então não é resíduo de configuração. `403` ou `461` ali poriam uma linha de erro na janela de status de todo mundo que conecta, que é o que o subject proíbe. **`JOIN` sem parâmetro nenhum continua `461`**: essa forma nenhum cliente manda, e é erro de quem digita no `nc`. A assimetria é medida, não inventada | aceita 2026-08-24 |
 | D16 | Tamanho de tópico | Sem constante nova em `Limits.hpp`. O único teto é a truncagem em 510 do `sendToClient`, que já cobre o caso do prefixo empurrar a linha para fora do limite | aceita 2026-08-24 |
 | D17 | **`CAP` tem de responder — revoga a D2** | O irssi 1.4.5 **bloqueia o registro** esperando resposta ao `CAP LS`: com o handler silencioso da D2 ele nunca manda `PASS`/`NICK`/`USER` e o cliente de referência jamais conecta. `cmdCap` passa a responder `:ircserv CAP * LS :` (lista de capacidades **vazia**), ao que o irssi responde `CAP END` e segue o registro normalmente. `CAP REQ` → `NAK`; `CAP END` e qualquer outro subcomando → silêncio. A **motivação** da D2 continua de pé (nada de `421`, que polui a janela de status); o que estava errado era achar que silêncio bastava | aceita 2026-08-24, medida |
 
@@ -114,7 +115,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 |---|---|---|---|
 | 0 | irssi de verdade + captura do fio | D15 resolvida; **D2 refutada** | **done** 2026-08-24 |
 | 0.5 | `cmdCap` responde ao `CAP LS` (D17) | **o irssi completa o registro** — bloqueia toda a fase | **done** 2026-08-24 |
-| 0.6 | `cmdMode` mínimo: silêncio em alvo não-canal, consulta `324` | `/connect` e `/join` com a janela de status **limpa** | todo |
+| 0.6 | `cmdMode` mínimo: silêncio em alvo não-canal, consulta `324` | some o `MODE Unknown command`; sobra o `JOIN :` (D18, Passo 1) | **done** 2026-08-24 |
 | 1 | `cmdJoin` — canal novo, `JOIN`/`332`/`353`/`366` | `/join #test` abre a janela **com a lista de nicks** | todo |
 | 2 | `cmdJoin` — múltiplos canais e portões `+i`/`+k`/`+l` | `#a,#b key1,key2`; `473`/`475`/`471` | todo |
 | 3 | `cmdPart` | dois irssi, um sai, o outro vê; canal vazio some | todo |
@@ -390,11 +391,23 @@ E a manutenção que todo passo que registra comando carrega:
 `tests/test_server.cpp::testCommandTable` vai de `7` para `8` entradas, com
 `MODE` presente.
 
-### Pronto quando
+### Pronto quando — e o que este passo NÃO alcança
 
-`/connect localhost 6667 secret` seguido de `/join` **não deixa uma única
-linha de erro na janela de status** — que é o item 1 do `PLANO.md` §3 Fase 3,
-finalmente cumprido.
+**Concluído em 2026-08-24.** `make test` em 415 asserções, `tests/it/mode.sh`
+com 8 casos, e o fio mostrando `MODE edu_k +i` **sem nenhuma resposta**: a
+linha `MODE Unknown command` sumiu da janela de status.
+
+O script foi **validado por mutação**, como os dois do `FASE2.md`: trocando o
+`return` do ramo silencioso por uma queda no caminho do `403` — que é
+exatamente o erro tentador —, três asserções falham, a do `403` incluída.
+
+> **O critério que este passo escrevia para si mesmo era otimista demais.** Ele
+> dizia "`/connect` e `/join` sem uma linha de erro". Sobra uma: o irssi manda
+> **`JOIN :`** sozinho, e sem `cmdJoin` isso ainda é `421 :Unknown command`.
+> Descoberto ao verificar com um perfil de irssi recém-criado, justamente para
+> não afirmar limpeza sem ter olhado. Quem fecha isso é o **Passo 1**, com a
+> **D18**. O que o 0.6 entrega é uma das duas linhas de erro, e a certeza de
+> qual é a outra.
 
 ---
 
@@ -405,10 +418,12 @@ num canal.
 
 ### Implementar
 
-Criar `src/CommandsChannel.cpp` (D11) com `cmdJoin` cobrindo **apenas um
-canal, sem chave e sem modos**:
+Em `src/CommandsChannel.cpp` (criado no Passo 0.6), `cmdJoin` cobrindo
+**apenas um canal, sem chave e sem modos**:
 
-- `461` se não veio parâmetro;
+- `461` se não veio parâmetro **nenhum**;
+- **`JOIN :` — um único parâmetro vazio — é silêncio (D18)**, não `403`. O
+  irssi manda essa linha sozinho em toda conexão, antes mesmo do `CAP END`;
 - `403` se `!utils::isValidChannelName(nome)` (cobre `&foo`, `foo`, `#`, `0`);
 - `getOrCreateChannel` — o seam já é case-insensitive, não normalize nada;
 - se o canal foi **criado agora** (estava vazio antes do `addMember`), o
@@ -435,6 +450,7 @@ chamada em `tests/test_main.cpp` — as duas linhas do `FASE2.md` §3.3 item 4.
 
 ```
 JOIN sem parâmetro                     -> 461 ... JOIN :Not enough parameters
+JOIN :          (parâmetro vazio)      -> "" silêncio (D18, o caso do irssi)
 JOIN &foo / JOIN foo / JOIN #          -> 403 ... :No such channel
 JOIN #room num servidor vazio          -> o canal passa a existir (findChannel != NULL)
                                        -> o entrante é membro E operador

@@ -255,13 +255,20 @@ static void	testCommandTable(void)
 	check(table.find("pass") == table.end(),
 		"table: keys are uppercase, matching what the dispatcher searches for");
 
-	// Documents the current state rather than a desired one: the domain
-	// entries stay commented out in src/CommandTable.cpp until their handlers
-	// have bodies, because registering one earlier is an undefined reference
-	// that breaks BOTH binaries. This flips when they land.
+	// MODE is the first domain entry to land, ahead of JOIN, because irssi
+	// sends "MODE <nick> +i" unprompted right after registering and a 421 in
+	// its status window is an error the subject forbids. See step 0.6 of
+	// docs/FASE3.md.
+	check(table.find("MODE") != table.end(), "table: MODE is registered");
+
+	// Documents the current state rather than a desired one: the remaining
+	// domain entries stay commented out in src/CommandTable.cpp until their
+	// handlers have bodies, because registering one earlier is an undefined
+	// reference that breaks BOTH binaries. Each flips as it lands.
 	check(table.find("JOIN") == table.end(),
-		"table: the domain entries are not wired up yet");
-	check(table.size() == 7, "table: exactly the seven transport commands");
+		"table: JOIN is not wired up yet");
+	check(table.size() == 8,
+		"table: the seven transport commands, plus MODE");
 }
 
 void	runServerTests(void)

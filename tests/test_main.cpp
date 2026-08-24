@@ -56,6 +56,7 @@ int	main(void)
 	runMessageTests();
 	runRepliesTests();
 	runChannelTests();
+	runCommandChannelTests();
 
 	std::cout << std::endl
 		<< g_passed << " passed, " << g_failed << " failed" << std::endl;

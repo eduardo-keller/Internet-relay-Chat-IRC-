@@ -37,7 +37,13 @@ CommandTable	buildCommandTable()
 	// table["KICK"] = &cmdKick;
 	// table["INVITE"] = &cmdInvite;
 	// table["TOPIC"] = &cmdTopic;
-	// table["MODE"] = &cmdMode;
+
+	// MODE is registered ahead of the other six, out of the order the TASKS.md
+	// list suggests, and step 0.6 of docs/FASE3.md says why: irssi sends
+	// "MODE <nick> +i" by itself right after registering, so without a handler
+	// every connection collects a 421 in its status window. The body answers
+	// the query and changes nothing yet.
+	table["MODE"] = &cmdMode;
 
 	return (table);
 }

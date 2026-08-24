@@ -105,6 +105,10 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 
 ## Fase 3 — Comandos contra o irssi
 
+> **Dono da fase: Eduardo**, não o colega — ver o cabeçalho do `FASE3.md`. Os
+> passos 0, 0.5 e 0.6 já rodaram; o `cmdCap` da Fase 2 foi corrigido no
+> caminho (D17), porque ele impedia o irssi de registrar.
+
 | Item | Dono | Status |
 |---|---|---|
 | `cmdJoin` — canal novo, criador vira operador | DOMAIN | todo |
@@ -123,7 +127,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `cmdMode` — `k` | DOMAIN | todo |
 | `cmdMode` — `o` | DOMAIN | todo |
 | `cmdMode` — `l` | DOMAIN | todo |
-| `cmdMode` — consulta (`324`) e flag desconhecida (`472`) | DOMAIN | todo |
+| `cmdMode` — consulta (`324`) e flag desconhecida (`472`) | ~~DOMAIN~~ Eduardo | **parcial** — o `324` e o silêncio em alvo não-canal entraram no passo 0.6 da Fase 3 (`tests/it/mode.sh`); o `472` fica para o passo 9 |
 | Confirmar `341` e `366` contra o irssi e anotar no `ARCHITECTURE.md` | BOTH | todo |
 
 ---

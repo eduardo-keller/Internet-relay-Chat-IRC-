@@ -165,6 +165,7 @@ by hand, with the server stopped — each script starts its own:
 ./tests/it/registration.sh   # PASS/NICK/USER, 001-004, 433 with two connections
 ./tests/it/session.sh        # PING/PONG, QUIT glued to another command, CAP
 ./tests/it/hardening.sh      # binary garbage, NUL bytes, 50 connections at once
+./tests/it/mode.sh           # the unprompted MODE irssi sends on every connect
 ./tests/it/channel_seam.sh   # the disconnect sweep, under valgrind
 
 for t in tests/it/*.sh; do "$t" || echo "FAILED: $t"; done
