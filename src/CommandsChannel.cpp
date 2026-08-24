@@ -1,11 +1,14 @@
+#include <set>
 #include <string>
 
 #include "Channel.hpp"
 #include "Client.hpp"
 #include "Command.hpp"
+#include "Limits.hpp"
 #include "Message.hpp"
 #include "Replies.hpp"
 #include "Server.hpp"
+#include "Utils.hpp"
 
 // The channel command handlers: JOIN, PART, PRIVMSG, KICK, INVITE, TOPIC and
 // MODE. See docs/FASE3.md for the order they are being built in.
@@ -22,6 +25,140 @@
 // a channel name. The last one is decision D5: Server keys _channels by
 // utils::toIrcLower while Channel::getName() keeps the original spelling, so a
 // handler passes whatever the client typed and gets the right channel back.
+
+// RPL_NAMREPLY — the member list a client gets on JOIN.
+//
+// IT IS SENT IN AS MANY LINES AS IT TAKES, and that is not gold plating. A 353
+// is capped at 510 bytes like every other message, and Server::sendToClient
+// truncates anything longer without asking: one line would silently drop
+// members from a channel with more than a dozen people in it, and the client's
+// nick list would be wrong with nothing to show for it. Real servers split, so
+// this splits.
+//
+// Operators carry '@'. We implement no voice, so there is no '+' prefix here.
+//
+// The member set is a std::set<Client *>, so the ORDER IS BY ADDRESS and
+// varies between runs (FASE2.md section 3.3, item 7). Nothing may depend on
+// it, here or in a test.
+static void	sendNamesReply(Server &server, Client &sender, Channel &channel)
+{
+	// Built once and reused as the head of every line. It already ends with
+	// the ':' that opens the trailing parameter, so the budget below is simply
+	// what is left of MAX_PAYLOAD_LEN after it.
+	const std::string	head = irc::numeric(server.getServerName(),
+							irc::RPL_NAMREPLY, sender.getNickname(),
+							"= " + channel.getName() + " :");
+	const std::set<Client *>	&members = channel.getMembers();
+	std::string					names;
+
+	for (std::set<Client *>::const_iterator it = members.begin();
+		it != members.end(); ++it)
+	{
+		if (*it == NULL)
+			continue ;
+
+		const std::string	entry = (channel.isOperator(*it) ? "@" : "")
+								+ (*it)->getNickname();
+
+		// The +1 is the space that would join this entry to the previous one.
+		// Flushing BEFORE appending is what keeps the line under the limit
+		// rather than one entry over it.
+		if (!names.empty()
+			&& head.size() + names.size() + 1 + entry.size()
+			> irc::MAX_PAYLOAD_LEN)
+		{
+			server.sendToClient(sender, head + names);
+			names.clear();
+		}
+		if (!names.empty())
+			names += " ";
+		names += entry;
+	}
+	// The sender has just been added, so the channel is never empty here and
+	// this always sends the one remaining line.
+	if (!names.empty())
+		server.sendToClient(sender, head + names);
+}
+
+// JOIN — one channel, no key and no mode checks. Step 1 of docs/FASE3.md;
+// multiple channels and the +i/+k/+l gates arrive in step 2.
+void	cmdJoin(Server &server, Client &sender, const Message &msg)
+{
+	if (msg.params.empty())
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NEEDMOREPARAMS, sender.getNickname(),
+				"JOIN :Not enough parameters"));
+		return ;
+	}
+
+	const std::string	&name = msg.params[0];
+
+	// AN EMPTY CHANNEL LIST IS SILENCE, NOT AN ERROR — decision D18.
+	//
+	// irssi 1.4.5 sends a bare "JOIN :" on its own on every single connection,
+	// before it has even finished CAP negotiation. It was captured on the wire
+	// with a pristine profile, so it is the client's behaviour and not a
+	// leftover setting. A 403 or a 461 here would put an error line in the
+	// status window of everybody who connects, and the subject requires the
+	// reference client to connect "without encountering any error".
+	//
+	// Note what this does NOT do: JOIN with no parameter at all is still 461
+	// above. That form is a typo at an nc prompt, not something any client
+	// sends, and answering it is how the user learns what they got wrong.
+	if (name.empty())
+		return ;
+
+	if (!utils::isValidChannelName(name))
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOSUCHCHANNEL, sender.getNickname(),
+				name + " :No such channel"));
+		return ;
+	}
+
+	Channel	*channel = server.getOrCreateChannel(name);
+
+	// Already in it: say nothing. Replaying the whole JOIN sequence would make
+	// irssi redraw the channel and re-announce the arrival to everyone else.
+	if (channel->isMember(&sender))
+		return ;
+
+	// ASKED BEFORE THE MEMBER IS ADDED, because "is this channel new?" is
+	// exactly "was it empty a moment ago?". getOrCreateChannel may have just
+	// created it, and an existing channel is never empty — the sweep in
+	// reapDisconnected deletes a channel as soon as its last member leaves.
+	const bool	isNewChannel = channel->isEmpty();
+
+	channel->addMember(&sender);
+	if (isNewChannel)
+		channel->addOperator(&sender);
+
+	// The order below is the contract (ARCHITECTURE.md section 6), and getting
+	// it wrong is the usual reason a channel window opens empty in irssi.
+
+	// 1. The JOIN itself, to EVERY member INCLUDING the sender: their client
+	//    uses this echo to open the window, and the others use it to update
+	//    their nick list. Hence `except` = NULL.
+	server.broadcastToChannel(*channel,
+		irc::fromClient(sender.prefix(), "JOIN", channel->getName()), NULL);
+
+	// 2. The topic, only to the joiner.
+	if (channel->getTopic().empty())
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::RPL_NOTOPIC, sender.getNickname(),
+				channel->getName() + " :No topic is set"));
+	else
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::RPL_TOPIC, sender.getNickname(),
+				channel->getName() + " :" + channel->getTopic()));
+
+	// 3. and 4. The member list and its terminator, also only to the joiner.
+	sendNamesReply(server, sender, *channel);
+	server.sendToClient(sender, irc::numeric(server.getServerName(),
+			irc::RPL_ENDOFNAMES, sender.getNickname(),
+			channel->getName() + " :End of /NAMES list"));
+}
 
 // MODE, in the smallest form that keeps irssi's status window clean.
 //

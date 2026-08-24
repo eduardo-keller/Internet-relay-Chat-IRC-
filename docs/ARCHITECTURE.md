@@ -271,9 +271,9 @@ Do not invent codes and do not reword these strings.
 | 324 | RPL_CHANNELMODEIS | `<channel> <mode> <mode params>` |
 | 331 | RPL_NOTOPIC | `<channel> :No topic is set` |
 | 332 | RPL_TOPIC | `<channel> :<topic>` |
-| 341 | RPL_INVITING | `<channel> <nick>` — see note below |
+| 341 | RPL_INVITING | `<nick> <channel>` — RFC 1459 order, decision D8 |
 | 353 | RPL_NAMREPLY | `= <channel> :<prefixed nicks separated by spaces>` |
-| 366 | RPL_ENDOFNAMES | `<channel> :End of NAMES list` |
+| 366 | RPL_ENDOFNAMES | `<channel> :End of /NAMES list` — with the slash, decision D9 |
 | 401 | ERR_NOSUCHNICK | `<nickname> :No such nick/channel` |
 | 403 | ERR_NOSUCHCHANNEL | `<channel> :No such channel` |
 | 404 | ERR_CANNOTSENDTOCHAN | `<channel> :Cannot send to channel` |
@@ -330,11 +330,16 @@ forever afterwards and would replay the welcome on every subsequent `NICK`.
 > irssi objects in phase 3, add 409 to the table **and say so** — do not
 > improvise in the handler.
 
-> **Two codes where RFC 1459 and RFC 2812 disagree.** For 341, RFC 2812 says
-> `<channel> <nick>` while RFC 1459 says `<nick> <channel>`, and most real
-> servers follow 1459. For 366, RFC 2812 says `End of NAMES list` while much
-> deployed software sends `End of /NAMES list`. Both are cosmetic to irssi.
-> **Pick one, verify against irssi in Phase 3, and write the decision here.**
+> **Two codes where RFC 1459 and RFC 2812 disagree, now decided.** For 341,
+> RFC 2812 says `<channel> <nick>` while RFC 1459 says `<nick> <channel>`, and
+> most real servers follow 1459. For 366, RFC 2812 says `End of NAMES list`
+> while much deployed software sends `End of /NAMES list`.
+>
+> **Both follow the deployed form** — decisions D8 and D9 in `docs/FASE3.md`.
+> 366 was confirmed against irssi 1.4.5 in phase 3 step 1: the channel window
+> opens with its nick list populated and nothing in the status window. 341 is
+> implemented but not yet seen in irssi; that happens in step 8, and if irssi
+> disagrees the decision changes **here** rather than in the handler.
 
 ### Non-numeric messages the server relays
 
@@ -369,11 +374,17 @@ channel window opens empty:
 :nick!user@host JOIN #chan          (broadcast to all members, sender included)
 :server 332 nick #chan :<topic>     (or 331 if no topic)
 :server 353 nick = #chan :@op nick2 nick3
-:server 366 nick #chan :End of NAMES list
+:server 366 nick #chan :End of /NAMES list
 ```
 
 In 353, channel operators are prefixed with `@`. We do not implement voice, so
 no `+` prefixes.
+
+**353 is sent in as many lines as it takes.** It is capped at 510 bytes like
+every other message, and `sendToClient` truncates anything longer without
+asking — one line would silently drop members from a channel of more than a
+dozen people, leaving the client's nick list wrong with nothing to show for it.
+Every line repeats the same `= #chan :` head.
 
 ---
 

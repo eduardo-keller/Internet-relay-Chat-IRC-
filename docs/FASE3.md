@@ -102,7 +102,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | D12 | Parâmetro ruim de modo | **Ausente** em `+k`/`+l`/`+o` → `461 ERR_NEEDMOREPARAMS`. **Presente mas inválido** em `+l` (não numérico, ou `<= 0`) → a flag é **ignorada em silêncio**, sem numeric: não existe código na tabela para "parâmetro absurdo", e inventar um é proibido pelo `ARCHITECTURE.md` §10 | aceita 2026-08-24 |
 | D13 | `PRIVMSG` para canal de quem não é membro | `404 ERR_CANNOTSENDTOCHAN`. Não implementamos `+n`, mas deixar um estranho falar num canal em que não está é pior do que recusar, e o `404` já está na tabela | aceita 2026-08-24 |
 | D14 | `JOIN 0` (sair de todos os canais) | **Não implementado.** `0` reprova em `isValidChannelName` e ganha `403 ERR_NOSUCHCHANNEL`. Está fora da lista do subject, e o irssi manda `PART` explícito | aceita 2026-08-24 |
-| D15 | `WHO` / `WHOIS` / outros que o irssi mandar sozinho | **RESOLVIDA no Passo 0, com o fio capturado.** O irssi 1.4.5 manda sozinho exatamente isto: `CAP LS 302`, **`JOIN :`** (lista de canais **vazia**, antes até do `CAP END`), `CAP END`, `PASS`, `NICK`, `USER`, `MODE <nick> +i` e, depois de cada `JOIN`, `MODE <canal>`. **Não manda `WHO` nem `WHOIS`.** Portanto nenhum handler no-op novo é preciso — mas `cmdMode` ganha duas obrigações que não estavam no `TASKS.md` (consulta `324` e silêncio em alvo não-canal), e o `cmdJoin` ganha a D18 | aceita 2026-08-24 |
+| D15 | `WHO` / `WHOIS` / outros que o irssi mandar sozinho | **CORRIGIDA no Passo 1 — a primeira versão estava errada.** O irssi 1.4.5 manda sozinho: `CAP LS 302`, **`JOIN :`** (lista vazia, antes até do `CAP END`), `CAP END`, `PASS`, `NICK`, `USER`, `MODE <nick> +i`, `MODE <canal>` após cada `JOIN`, `PING` no timer — **e também `WHO <canal>` e `WHOIS <nick>`**. A captura do Passo 0 tinha **um cliente só e um canal vazio**, e nessas condições o `WHO`/`WHOIS` não aparece; com dois clientes num canal, aparece, e vira `421 :Unknown command` na janela de status dos dois. Uma amostra de um cliente não descreve o comportamento de dois — a lição a levar para o Passo 13. Tratamento pendente: **Passo 1.5** | corrigida 2026-08-24 |
 | D18 | `JOIN` com lista de canais **vazia** (`JOIN :`) | **Silêncio**, sem numeric. O irssi manda essa linha sozinho em toda conexão — confirmado com perfil recém-criado, e visível também na captura contra o servidor-mock, então não é resíduo de configuração. `403` ou `461` ali poriam uma linha de erro na janela de status de todo mundo que conecta, que é o que o subject proíbe. **`JOIN` sem parâmetro nenhum continua `461`**: essa forma nenhum cliente manda, e é erro de quem digita no `nc`. A assimetria é medida, não inventada | aceita 2026-08-24 |
 | D16 | Tamanho de tópico | Sem constante nova em `Limits.hpp`. O único teto é a truncagem em 510 do `sendToClient`, que já cobre o caso do prefixo empurrar a linha para fora do limite | aceita 2026-08-24 |
 | D17 | **`CAP` tem de responder — revoga a D2** | O irssi 1.4.5 **bloqueia o registro** esperando resposta ao `CAP LS`: com o handler silencioso da D2 ele nunca manda `PASS`/`NICK`/`USER` e o cliente de referência jamais conecta. `cmdCap` passa a responder `:ircserv CAP * LS :` (lista de capacidades **vazia**), ao que o irssi responde `CAP END` e segue o registro normalmente. `CAP REQ` → `NAK`; `CAP END` e qualquer outro subcomando → silêncio. A **motivação** da D2 continua de pé (nada de `421`, que polui a janela de status); o que estava errado era achar que silêncio bastava | aceita 2026-08-24, medida |
@@ -116,7 +116,8 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | 0 | irssi de verdade + captura do fio | D15 resolvida; **D2 refutada** | **done** 2026-08-24 |
 | 0.5 | `cmdCap` responde ao `CAP LS` (D17) | **o irssi completa o registro** — bloqueia toda a fase | **done** 2026-08-24 |
 | 0.6 | `cmdMode` mínimo: silêncio em alvo não-canal, consulta `324` | some o `MODE Unknown command`; sobra o `JOIN :` (D18, Passo 1) | **done** 2026-08-24 |
-| 1 | `cmdJoin` — canal novo, `JOIN`/`332`/`353`/`366` | `/join #test` abre a janela **com a lista de nicks** | todo |
+| 1 | `cmdJoin` — canal novo, `JOIN`/`332`/`353`/`366` | `/join #test` abre a janela **com a lista de nicks** | **done** 2026-08-24 |
+| 1.5 | `WHO` / `WHOIS` — o `421` que só aparece com dois clientes | janela de status limpa numa sessão de duas pessoas | todo |
 | 2 | `cmdJoin` — múltiplos canais e portões `+i`/`+k`/`+l` | `#a,#b key1,key2`; `473`/`475`/`471` | todo |
 | 3 | `cmdPart` | dois irssi, um sai, o outro vê; canal vazio some | todo |
 | 4 | `cmdPrivmsg` para canal | conversa entre dois irssi | todo |
@@ -481,19 +482,38 @@ Dois clientes registrados entram em `#room`; asserções sobre os bytes:
 sequência `JOIN`/`332`ou`331`/`353`/`366`, `@` no criador, e o segundo `JOIN`
 chegando ao primeiro cliente.
 
-### Pronto quando
+### Pronto quando — cumprido em 2026-08-24
 
-`make test` verde, `join.sh` verde, `channel_seam.sh` **rodando de verdade**
-(não mais pulando) e limpo no valgrind, e no irssi:
-`/join #test` abre a janela do canal **com a lista de nicks preenchida** — se a
-lista vier vazia, a sequência está fora de ordem. O Passo 0 já provou que este
-formato de saída renderiza certo no irssi 1.4.5.
+`make test` em **446 asserções**, `tests/it/join.sh` com 15 casos, e o
+`channel_seam.sh` **rodando de verdade** pela primeira vez (9 casos, sob
+valgrind, sem vazamento e sem leitura inválida) — ele passou a Fase 2 inteira
+se auto-pulando à espera deste handler.
 
-> **Ruído esperado entre o Passo 1 e o Passo 9:** logo depois de entrar, o
-> irssi manda `MODE #test` sozinho (D15) e vai levar `421 :Unknown command` na
-> janela de status até o `cmdMode` existir. Não é regressão — mas se incomodar,
-> a saída é antecipar só a parte de consulta do Passo 9 (o `324` e o silêncio
-> no alvo não-canal), que não depende de nenhum outro passo.
+No irssi, com **duas** sessões: a janela do canal abre com a lista de nicks
+preenchida (`[@edu_k] [ edu_k_]`, "Total of 2 nicks [1 ops]"), e a entrada do
+segundo é anunciada ao primeiro.
+
+Três coisas que apareceram só por ter usado dois clientes de verdade:
+
+1. **O `433` funciona no cliente real.** O segundo irssi pediu o mesmo nick,
+   levou `433` e se renomeou sozinho para `edu_k_`. Item da Fase 2 que nunca
+   tinha sido verificado fora do `nc`.
+2. **`WHO` e `WHOIS` existem**, ao contrário do que a D15 dizia. Ver o Passo
+   1.5.
+3. **Uma linha duplicada no fio não era bug.** O `JOIN` do segundo cliente
+   aparece duas vezes no log do proxy porque ele atende as duas conexões e
+   grava tudo no mesmo arquivo: uma cópia é o eco para quem entrou, a outra é
+   o broadcast para quem já estava. O `broadcastToChannel` mandou uma por
+   socket, que é o correto.
+
+### O que este passo consertou de quebra
+
+- `tests/it/channel_seam.sh` deixou de sondar por `421` e passou a registrar
+  antes do `JOIN`. Duas asserções novas provam a varredura de verdade: a
+  entrante depois da morte recebe o `366`, e a morta **sumiu** do `353`.
+- Nesse mesmo script, o `kill -9` só matava o subshell, e o `cat` filho seguia
+  segurando o socket — o servidor nunca via a desconexão e o teste não provava
+  nada. Foi a asserção do `353` que pegou isso.
 
 Itens do `TASKS.md`: `cmdJoin — canal novo` e `cmdJoin — sequência`.
 

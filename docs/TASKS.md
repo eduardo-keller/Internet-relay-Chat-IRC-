@@ -111,8 +111,8 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 
 | Item | Dono | Status |
 |---|---|---|
-| `cmdJoin` — canal novo, criador vira operador | DOMAIN | todo |
-| `cmdJoin` — sequência `JOIN`/`332`/`353`/`366` | DOMAIN | todo |
+| `cmdJoin` — canal novo, criador vira operador | ~~DOMAIN~~ Eduardo | done (passo 1; `tests/it/join.sh`) |
+| `cmdJoin` — sequência `JOIN`/`332`/`353`/`366` | ~~DOMAIN~~ Eduardo | done (passo 1; o `353` é quebrado em várias linhas quando passa de 510) |
 | `cmdJoin` — múltiplos canais (`#a,#b key1,key2`) | DOMAIN | todo |
 | `cmdJoin` — checagem de `+i`, `+k`, `+l` (`473`/`475`/`471`) | DOMAIN | todo |
 | `cmdPart` (+ `442`, canal vazio é removido) | DOMAIN | todo |
@@ -128,7 +128,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `cmdMode` — `o` | DOMAIN | todo |
 | `cmdMode` — `l` | DOMAIN | todo |
 | `cmdMode` — consulta (`324`) e flag desconhecida (`472`) | ~~DOMAIN~~ Eduardo | **parcial** — o `324` e o silêncio em alvo não-canal entraram no passo 0.6 da Fase 3 (`tests/it/mode.sh`); o `472` fica para o passo 9 |
-| Confirmar `341` e `366` contra o irssi e anotar no `ARCHITECTURE.md` | BOTH | todo |
+| Confirmar `341` e `366` contra o irssi e anotar no `ARCHITECTURE.md` | Eduardo | **parcial** — `366` com `/NAMES` confirmado no irssi (passo 1, D9); o `341` fica para o passo 8 |
 
 ---
 

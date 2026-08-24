@@ -31,7 +31,7 @@ CommandTable	buildCommandTable()
 	// reference that stops BOTH binaries, including make test, so these are
 	// enabled one at a time and never speculatively.
 	//
-	// table["JOIN"] = &cmdJoin;
+	table["JOIN"] = &cmdJoin;
 	// table["PART"] = &cmdPart;
 	// table["PRIVMSG"] = &cmdPrivmsg;
 	// table["KICK"] = &cmdKick;

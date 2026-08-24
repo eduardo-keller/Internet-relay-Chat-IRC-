@@ -167,6 +167,7 @@ by hand, with the server stopped — each script starts its own:
 ./tests/it/hardening.sh      # binary garbage, NUL bytes, 50 connections at once
 ./tests/it/mode.sh           # the unprompted MODE irssi sends on every connect
 ./tests/it/channel_seam.sh   # the disconnect sweep, under valgrind
+./tests/it/join.sh           # the JOIN sequence, and two clients in one channel
 
 for t in tests/it/*.sh; do "$t" || echo "FAILED: $t"; done
 ```
@@ -182,9 +183,9 @@ while a `Channel` still points at it) and `session.sh` (a `QUIT` sharing a
 packet with the command after it). They need `valgrind` installed and take a
 few seconds longer.
 
-`channel_seam.sh` **skips itself** while `JOIN` is not in the command table —
-it probes for it first and says so. It reactivates on its own once the handler
-is registered.
+`channel_seam.sh` used to **skip itself** while `JOIN` was not in the command
+table. It runs for real since phase 3 step 1, and its clients now complete
+PASS/NICK/USER before joining, because JOIN sits behind the registration gate.
 
 > These scripts assert on what the server sends back. Where an earlier version
 > asserted on the server's own log output, that was a stopgap for the days

@@ -265,10 +265,11 @@ static void	testCommandTable(void)
 	// domain entries stay commented out in src/CommandTable.cpp until their
 	// handlers have bodies, because registering one earlier is an undefined
 	// reference that breaks BOTH binaries. Each flips as it lands.
-	check(table.find("JOIN") == table.end(),
-		"table: JOIN is not wired up yet");
-	check(table.size() == 8,
-		"table: the seven transport commands, plus MODE");
+	check(table.find("JOIN") != table.end(), "table: JOIN is registered");
+	check(table.find("PART") == table.end(),
+		"table: PART is not wired up yet");
+	check(table.size() == 9,
+		"table: the seven transport commands, plus MODE and JOIN");
 }
 
 void	runServerTests(void)
