@@ -99,7 +99,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | Rajada de boas-vindas `001`–`004` | TRANSPORT | done (uma vez só, garantido por `welcomeSent()`) |
 | `cmdPing` / `cmdPong` | TRANSPORT | done (`PING` sem token → `461`; ver nota no `FASE2.md`) |
 | `cmdQuit` | TRANSPORT | done (`tests/it/session.sh`, sob valgrind) |
-| `CAP` não derruba o servidor | TRANSPORT | done (handler no-op, D2; sem 421 e sem resposta) |
+| `CAP` não derruba o servidor | TRANSPORT | done — **corrigido na Fase 3, passo 0.5**: responde `:ircserv CAP * LS :` (D17, que supera a D2). O handler no-op da D2 travava o registro do irssi |
 
 ---
 

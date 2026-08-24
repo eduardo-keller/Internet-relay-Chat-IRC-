@@ -67,7 +67,7 @@ static void	testPing(void)
 		"PING works before registration");
 }
 
-static void	testPongAndCapAreSilent(void)
+static void	testPongIsSilent(void)
 {
 	Server	server(6667, "secret");
 	Client	client(-1, "localhost");
@@ -75,11 +75,83 @@ static void	testPongAndCapAreSilent(void)
 	feed(server, client, "PONG ircserv");
 	checkEqual(client.getOutputBuffer(), "",
 		"PONG is accepted and ignored: this server sends no PING to answer");
+	check(!client.isDisconnecting(), "and it disconnects nobody");
+}
 
+// CAP HAS TO ANSWER. Decision D17 in docs/FASE3.md, which supersedes D2.
+//
+// This test replaced one that asserted the exact opposite, and the reason is
+// worth keeping: D2 made cmdCap a silent no-op to keep a 421 out of irssi's
+// status window, and every test we wrote for it passed. Then irssi 1.4.5 was
+// pointed at the server for the first time and printed
+// "Waiting for CAP LS response..." forever — it never sent PASS, NICK or USER,
+// so nobody could register at all. The old assertion was green the whole time.
+//
+// That is ARCHITECTURE.md section 9 happening to us: unit tests prove we are
+// internally consistent, not that we are correct.
+static void	testCapNegotiation(void)
+{
+	Server	server(6667, "secret");
+	Client	client(-1, "localhost");
+
+	// An EMPTY capability list. We implement no capabilities, and this is how
+	// you say so — irssi answers it with CAP END and proceeds to register.
+	// The target is "*" because a client negotiating CAP has no nickname yet.
 	feed(server, client, "CAP LS 302");
-	checkEqual(client.getOutputBuffer(), "",
-		"CAP is silent (D2) — a 421 here would show as an error in irssi");
-	check(!client.isDisconnecting(), "and neither of them disconnects anybody");
+	checkEqual(client.getOutputBuffer(), ":ircserv CAP * LS :\r\n",
+		"CAP LS 302 is answered with an empty capability list");
+
+	// The version argument is optional; older clients send a bare LS.
+	Client	bare(-1, "localhost");
+
+	feed(server, bare, "CAP LS");
+	checkEqual(bare.getOutputBuffer(), ":ircserv CAP * LS :\r\n",
+		"a bare CAP LS gets the same answer");
+
+	// Nothing was offered, so nothing can be granted. NAK is the honest reply
+	// and the client carries on regardless.
+	Client	requester(-1, "localhost");
+
+	feed(server, requester, "CAP REQ :multi-prefix sasl");
+	checkEqual(requester.getOutputBuffer(),
+		":ircserv CAP * NAK :multi-prefix sasl\r\n",
+		"CAP REQ is refused with NAK, echoing what was asked for");
+
+	// END closes the negotiation. There is nothing to say back, and saying
+	// something here would be noise in front of the welcome burst.
+	Client	ending(-1, "localhost");
+
+	feed(server, ending, "CAP END");
+	checkEqual(ending.getOutputBuffer(), "",
+		"CAP END is silent");
+
+	// The SUBCOMMAND is matched case-insensitively. irssi sends it uppercase,
+	// but a lenient comparison costs one helper and removes a way to hang.
+	//
+	// The command NAME is deliberately still "CAP" here: making that half
+	// case-insensitive is the dispatcher's job, not this handler's, and feed()
+	// above is not the dispatcher — it matches msg.command literally. That
+	// half is covered over a real socket in tests/it/dispatch.sh.
+	Client	lower(-1, "localhost");
+
+	feed(server, lower, "CAP ls");
+	checkEqual(lower.getOutputBuffer(), ":ircserv CAP * LS :\r\n",
+		"the subcommand is case-insensitive");
+
+	// Neither of these may crash or reply. A bare CAP is the one that would
+	// index params[0] on an empty vector.
+	Client	empty(-1, "localhost");
+
+	feed(server, empty, "CAP");
+	checkEqual(empty.getOutputBuffer(), "",
+		"CAP with no subcommand is silent, and does not read past the params");
+
+	Client	unknown(-1, "localhost");
+
+	feed(server, unknown, "CAP NONSENSE");
+	checkEqual(unknown.getOutputBuffer(), "",
+		"an unknown subcommand is silent");
+	check(!unknown.isDisconnecting(), "and CAP never disconnects anybody");
 }
 
 static void	testQuit(void)
@@ -118,6 +190,7 @@ static void	testQuit(void)
 void	runCommandSessionTests(void)
 {
 	testPing();
-	testPongAndCapAreSilent();
+	testPongIsSilent();
+	testCapNegotiation();
 	testQuit();
 }

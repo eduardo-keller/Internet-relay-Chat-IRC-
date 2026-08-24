@@ -50,7 +50,19 @@ os outros ficam inteiros dentro de código do TRANSPORT.
 | # | Decisão | Valor | Status |
 |---|---|---|---|
 | D1 | Nome do servidor em `:<servername>` | string fixa `"ircserv"` no código. **Não** derivar do hostname da máquina: isso exigiria `gethostname`, que não está na lista de funções externas permitidas do subject. (Cuidado: a lista tem `gethostbyname`, que é outra coisa — resolve nome → endereço IP.) | aceita |
-| D2 | `CAP` | handler no-op (ignora em silêncio) em vez de `421`: o irssi imprime o 421 na janela de status, e o subject exige conectar "without encountering any error". **Custo: declarar `cmdCap` no `Command.hpp` (header compartilhado)** | aceita |
+| D2 | `CAP` | handler no-op (ignora em silêncio) em vez de `421`: o irssi imprime o 421 na janela de status, e o subject exige conectar "without encountering any error". **Custo: declarar `cmdCap` no `Command.hpp` (header compartilhado)** | ~~aceita~~ **SUPERADA pela D17 em 2026-08-24 — ver `FASE3.md`** |
+
+> **Por que a D2 fica registrada em vez de ser reescrita.** O motivo dela estava
+> certo (o `421` polui a janela de status do irssi); o remédio, não. Testada
+> contra o irssi 1.4.5 pela primeira vez na Fase 3, a versão silenciosa deixou o
+> cliente parado em `Waiting for CAP LS response...`: ele **nunca** manda
+> `PASS`/`NICK`/`USER`, e ninguém consegue registrar. A D17 troca o silêncio por
+> uma lista de capacidades vazia.
+>
+> O que essa decisão custou é o dado interessante: **toda a Fase 2 foi validada
+> com `nc` e scripts, e nenhum deles podia pegar esse bug** — o `nc` não espera
+> a resposta do `CAP` como um cliente de verdade espera. É o aviso do
+> `ARCHITECTURE.md` §9 acontecendo com a gente.
 | D3 | `004 RPL_MYINFO` | `ircserv 1.0 - itkol` — nenhum modo de usuário, os cinco modos de canal que implementamos | aceita |
 | D4 | `003 RPL_CREATED` | `__DATE__ " " __TIME__` — sem syscall, fácil de explicar | aceita |
 | D5 | Chave do mapa `_channels` | `utils::toIrcLower(nome)`; `Channel::getName()` guarda a grafia original para exibição. **Contrato entre as trilhas — anotar no `ARCHITECTURE.md` §5** | aceita |

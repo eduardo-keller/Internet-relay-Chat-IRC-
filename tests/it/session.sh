@@ -84,8 +84,31 @@ check "PING devolve o mesmo token" \
 check "token com espacos volta inteiro" \
 	":ircserv PONG ircserv :two words" "$(talk 'PING :two words\r\n')"
 
-# 3. CAP does not produce an error of any kind (decision D2).
-check "CAP LS 302 nao gera resposta nem erro" "" "$(talk 'CAP LS 302\r\n')"
+# 3. CAP IS ANSWERED WITH AN EMPTY CAPABILITY LIST (decision D17, which
+#    supersedes D2). This assertion used to say the opposite — "no reply and no
+#    error" — and it was green for the whole of phase 2. The first time irssi
+#    1.4.5 was pointed at the server it printed "Waiting for CAP LS response..."
+#    and never sent PASS, NICK or USER: silence is not a non-answer to a real
+#    client, it is a stall, and nobody could register at all.
+check "CAP LS 302 devolve a lista de capacidades vazia" \
+	":ircserv CAP * LS :" "$(talk 'CAP LS 302\r\n')"
+
+check "CAP REQ e recusado com NAK" \
+	":ircserv CAP * NAK :multi-prefix" "$(talk 'CAP REQ :multi-prefix\r\n')"
+
+check "CAP END nao responde nada" "" "$(talk 'CAP END\r\n')"
+
+# 3.1 THE REGRESSION THAT THE BUG ITSELF WOULD HAVE CAUGHT: the exact opening
+#     irssi sends, all in one packet. The CAP answer AND the four registration
+#     numerics have to come back. With the old silent handler this still
+#     "worked" over nc — because nc does not wait for the CAP reply the way a
+#     real client does — which is precisely why the unit tests never noticed.
+OUT=$(talk 'CAP LS 302\r\nCAP END\r\nPASS secret\r\nNICK carol\r\nUSER carol 0 * :Carol\r\n')
+check "abertura completa do irssi num pacote so: responde o CAP" \
+	"1" "$(printf '%s\n' "$OUT" | grep -c '^:ircserv CAP \* LS :$')"
+check "abertura completa do irssi num pacote so: registra" \
+	"001 002 003 004 " \
+	"$(printf '%s\n' "$OUT" | sed -n 's/^:ircserv \([0-9]*\) .*/\1/p' | tr '\n' ' ')"
 
 # 4. THE USE-AFTER-FREE CASE. Everything below arrives in ONE write: register,
 #    quit, and then a command that must never be dispatched.

@@ -263,13 +263,78 @@ void	cmdPong(Server &, Client &, const Message &)
 	// no liveness state for a PONG to update. Answering it would be noise.
 }
 
-void	cmdCap(Server &, Client &, const Message &)
+// Plain ASCII uppercasing, for the CAP subcommand.
+//
+// A deliberate copy of the helper in Server.cpp rather than a shared export,
+// for the same reason replyTarget above is one: it is six lines, and exporting
+// it would put a second general-purpose string utility next to utils::* that
+// nobody else asked for. As there, utils::toIrcLower is NOT the right tool —
+// its {}|^ rule is about nicknames and channel names, and a CAP subcommand is
+// neither.
+static std::string	toUpperAscii(const std::string &s)
 {
-	// Decision D2: a handler that does nothing, on purpose.
-	//
-	// irssi sends "CAP LS 302" before PASS on every single connect. We
-	// implement no capabilities, so there is nothing to negotiate — but
-	// answering 421 would print an error in its status window, and the subject
-	// requires the reference client to connect without encountering any error.
-	// Registering a silent handler is what keeps CAP out of the 421 path.
+	std::string	out(s);
+
+	for (std::string::size_type i = 0; i < out.size(); ++i)
+	{
+		unsigned char	c = static_cast<unsigned char>(out[i]);
+
+		if (c >= 'a' && c <= 'z')
+			out[i] = static_cast<char>(c - 'a' + 'A');
+	}
+	return (out);
+}
+
+// IRCv3 capability negotiation, in the smallest shape that lets a real client
+// through the door.
+//
+// DECISION D17 (docs/FASE3.md), WHICH SUPERSEDES D2. D2 made this handler a
+// silent no-op: irssi sends "CAP LS 302" before PASS on every connect, we
+// implement no capabilities, and answering 421 would print an error in its
+// status window — which the subject forbids. The reasoning was right and the
+// remedy was wrong. Pointed at irssi 1.4.5 for the first time, the silent
+// version made it print "Waiting for CAP LS response..." and stop: it never
+// sent PASS, NICK or USER, so NOBODY COULD REGISTER AT ALL. Silence is not a
+// non-answer to this client; it is a stall.
+//
+// An empty list is the honest reply — "I speak no capabilities" — and irssi
+// answers it with CAP END and gets on with registering. CAP stays outside the
+// registration gate (Server::isAllowedBeforeRegistration), because the whole
+// exchange happens before PASS.
+void	cmdCap(Server &server, Client &sender, const Message &msg)
+{
+	// A bare "CAP" is legal input from nc and would index an empty vector
+	// below. Nothing to negotiate, nothing to say.
+	if (msg.params.empty())
+		return ;
+
+	const std::string	sub = toUpperAscii(msg.params[0]);
+	const std::string	&name = server.getServerName();
+
+	// The target is the sender's nickname, or "*" when they have none — which
+	// is the usual case here, since CAP comes before NICK.
+	if (sub == "LS")
+	{
+		// The trailing ':' with nothing after it IS the empty list. Dropping
+		// the colon would make the line parse as having no trailing parameter
+		// at all, which is a different message.
+		server.sendToClient(sender, ":" + name + " CAP "
+			+ replyTarget(sender) + " LS :");
+	}
+	else if (sub == "REQ")
+	{
+		// Nothing was offered, so nothing can be granted. The request is
+		// echoed back inside the NAK so the client knows which one was
+		// refused; a client that never saw a capability in our LS has no
+		// business asking, but ACKing something we do not implement would be
+		// a lie it might then rely on.
+		const std::string	requested = msg.params.size() > 1
+									? msg.params[1] : "";
+
+		server.sendToClient(sender, ":" + name + " CAP "
+			+ replyTarget(sender) + " NAK :" + requested);
+	}
+	// END, LIST, and anything else: silence. END closes the negotiation and
+	// wants no reply — answering it would put a stray line in front of the
+	// welcome burst.
 }

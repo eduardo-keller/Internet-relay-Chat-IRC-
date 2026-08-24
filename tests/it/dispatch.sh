@@ -77,8 +77,11 @@ check "comando conhecido antes do registro -> 451" \
 #    let them through, and no other reply means nothing else fired.
 check "PASS passa pela porta do registro (corpo vazio, sem resposta)" \
 	"" "$(talk 'PASS secret\r\n')"
-check "CAP nao gera erro nenhum (decisao D2)" \
-	"" "$(talk 'CAP LS 302\r\n')"
+#    CAP passes the same gate, but it is no longer silent (D17 supersedes D2):
+#    what this file cares about is that it does NOT take the 421 path and does
+#    NOT take the 451 path. The content of the answer is asserted in session.sh.
+check "CAP passa pela porta do registro e nao vira 421 nem 451" \
+	":ircserv CAP * LS :" "$(talk 'CAP LS 302\r\n')"
 
 # 5. Blank lines produce NO reply at all. nc sends one every time the user
 #    presses Enter on an empty prompt; answering them would flood the client.

@@ -247,7 +247,8 @@ static void	testCommandTable(void)
 	check(table.find("QUIT") != table.end(), "table: QUIT is registered");
 	check(table.find("PING") != table.end(), "table: PING is registered");
 	check(table.find("PONG") != table.end(), "table: PONG is registered");
-	check(table.find("CAP") != table.end(), "table: CAP is registered (D2)");
+	check(table.find("CAP") != table.end(),
+		"table: CAP is registered, and answers since D17");
 
 	// The dispatcher uppercases before looking up, so the keys must be
 	// uppercase. A lowercase key would simply never be found — silently.

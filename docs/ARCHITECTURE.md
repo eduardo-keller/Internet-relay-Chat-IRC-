@@ -396,12 +396,27 @@ Rules:
 
 Test against these, not against a clean-room reading of the RFC:
 
-1. Sends `CAP LS 302` **before** `PASS`. We do not implement capabilities.
-   **Decided in phase 2: ignore it silently** — `cmdCap` is a registered
-   handler with an empty body. The alternative, replying `421`, puts an error
-   line in irssi's status window, and the subject requires the reference client
-   to connect "without encountering any error". It is **not** a registration
-   step and must not crash anything.
+1. Sends `CAP LS 302` **before** `PASS`, and **waits for the answer**. We
+   implement no capabilities, so the answer is an empty list:
+
+   ```
+   :ircserv CAP * LS :        (CAP REQ -> ":ircserv CAP * NAK :<what was asked>")
+   ```
+
+   irssi replies `CAP END` to that and proceeds with `PASS`/`NICK`/`USER`.
+
+   > **This is decision D17 and it supersedes D2 (`docs/FASE3.md`).** Phase 2
+   > decided to ignore `CAP` *silently*, to keep a `421` out of irssi's status
+   > window — the subject requires the reference client to connect "without
+   > encountering any error". The reasoning was right; the remedy was not.
+   > Pointed at irssi 1.4.5, the silent handler made it print
+   > `Waiting for CAP LS response...` and stop: it never sent `PASS`, `NICK` or
+   > `USER`, so **nobody could register at all**. Silence is not a non-answer
+   > to a real client, it is a stall. Every unit test we had was green
+   > throughout — see section 9.
+
+   `CAP` is still **not** a registration step, still passes the pre-registration
+   gate, and still must not crash anything.
 2. Sends `PASS`, `NICK`, `USER` back to back — often in a **single TCP packet**.
    The read buffer must split that into three commands.
 3. Sends `PING` periodically and expects a `PONG` with the same token. Miss it
