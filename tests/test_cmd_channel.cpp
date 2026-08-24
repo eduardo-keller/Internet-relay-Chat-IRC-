@@ -32,6 +32,8 @@ static void	feed(Server &server, Client &client, const std::string &line)
 		cmdMode(server, client, msg);
 	else if (msg.command == "JOIN")
 		cmdJoin(server, client, msg);
+	else if (msg.command == "PART")
+		cmdPart(server, client, msg);
 }
 
 static bool	contains(const std::string &haystack, const std::string &needle)
@@ -683,6 +685,177 @@ static void	testGateOrder(void)
 	check(channel->isMember(&guest), "with all three satisfied, they get in");
 }
 
+// --- step 3: leaving ------------------------------------------------------
+
+static void	testPartErrors(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+
+	feed(server, alice, "PART");
+	checkEqual(alice.getOutputBuffer(),
+		":ircserv 461 alice PART :Not enough parameters\r\n",
+		"PART with no parameter is 461");
+
+	Client	bob(-1, "localhost");
+
+	makeUser(bob, "bob");
+	feed(server, bob, "PART #nope");
+	checkEqual(bob.getOutputBuffer(),
+		":ircserv 403 bob #nope :No such channel\r\n",
+		"PART on a channel that does not exist is 403");
+
+	// THE CHANNEL EXISTS BUT THE SENDER IS NOT IN IT. A different error from
+	// 403, and the difference matters: 403 says the room is not there, 442
+	// says it is and you are not.
+	Client	owner(-1, "localhost");
+
+	makeUser(owner, "owner");
+	feed(server, owner, "JOIN #room");
+
+	Client	outsider(-1, "localhost");
+
+	makeUser(outsider, "outsider");
+	feed(server, outsider, "PART #room");
+	checkEqual(outsider.getOutputBuffer(),
+		":ircserv 442 outsider #room :You're not on that channel\r\n",
+		"PART from a non-member is 442");
+	check(server.findChannel("#room")->memberCount() == 1,
+		"and takes nobody out of the channel");
+}
+
+static void	testPartBroadcast(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+
+	Client	watcher(-1, "localhost");
+
+	makeUser(watcher, "watcher");
+	feed(server, watcher, "JOIN #room");
+
+	feed(server, bob, "PART #room :ate mais");
+
+	// THE LEAVER GETS THE ECHO TOO. That is what tells their client to close
+	// the window; without it irssi leaves a dead channel window open.
+	check(contains(bob.getOutputBuffer(),
+			":bob!bob@localhost PART #room :ate mais\r\n"),
+		"the client leaving receives its own PART");
+	check(contains(alice.getOutputBuffer(),
+			":bob!bob@localhost PART #room :ate mais\r\n"),
+		"and so does everyone still in the channel");
+	check(!server.findChannel("#room")->isMember(&bob),
+		"and the member is actually removed");
+
+	// NO REASON MEANS NO TRAILING PARAMETER, rather than an invented one. The
+	// client shows "has left" either way, and making up a reason would put
+	// words in the user's mouth.
+	feed(server, watcher, "PART #room");
+	check(contains(alice.getOutputBuffer(),
+			":watcher!watcher@localhost PART #room\r\n"),
+		"a PART with no reason carries no trailing parameter");
+}
+
+// THE CHANNEL DIES WITH ITS LAST MEMBER, and everything it held dies with it:
+// topic, modes, key, and the operator list. That is what makes walking back in
+// a fresh start rather than a resurrection.
+static void	testChannelDisappearsWhenEmpty(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+	feed(server, alice, "JOIN #temp");
+
+	Channel	*channel = server.findChannel("#temp");
+
+	channel->setTopic("assunto qualquer");
+	channel->setKey("segredo");
+
+	feed(server, alice, "PART #temp");
+	check(server.findChannel("#temp") == NULL,
+		"the last member leaving destroys the channel");
+
+	// Walking back in creates a NEW channel: no topic, no key, and the person
+	// who opened it is its operator again.
+	Client	bob(-1, "localhost");
+
+	makeUser(bob, "bob");
+	feed(server, bob, "JOIN #temp");
+
+	Channel	*reborn = server.findChannel("#temp");
+
+	check(reborn != NULL && reborn->isOperator(&bob),
+		"whoever re-creates it is its operator");
+	check(reborn != NULL && reborn->getTopic().empty(),
+		"the old topic did not survive");
+	check(reborn != NULL && !reborn->hasKey(),
+		"and neither did the old key");
+}
+
+// A CHANNEL CAN END UP WITH NO OPERATOR AT ALL, and that is deliberate. The
+// alternative — promoting whoever happens to be next — picks a winner out of a
+// std::set ordered by memory address, which is to say at random. Real servers
+// leave the channel opless.
+static void	testChannelSurvivesLosingItsOperator(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+
+	feed(server, alice, "PART #room");
+
+	Channel	*channel = server.findChannel("#room");
+
+	check(channel != NULL, "the channel survives its operator leaving");
+	check(channel != NULL && channel->isMember(&bob),
+		"the remaining member is still in it");
+	check(channel != NULL && !channel->isOperator(&bob),
+		"and is NOT promoted to fill the vacancy");
+}
+
+static void	testPartSeveralChannels(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	holder(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(holder, "holder");
+
+	// A second member keeps both channels alive after alice leaves, so the
+	// assertions below are about membership rather than destruction.
+	feed(server, holder, "JOIN #a,#b");
+	feed(server, alice, "JOIN #a,#b");
+	feed(server, alice, "PART #a,#b :saindo");
+
+	check(!server.findChannel("#a")->isMember(&alice)
+		&& !server.findChannel("#b")->isMember(&alice),
+		"PART takes a list, like JOIN");
+	check(countOf(alice.getOutputBuffer(), " PART ") == 2,
+		"with one echo per channel");
+
+	// One bad name does not cancel the rest, same rule as JOIN.
+	feed(server, holder, "PART #nope,#a");
+	check(contains(holder.getOutputBuffer(), " 403 holder #nope "),
+		"the missing channel is refused");
+	check(server.findChannel("#a") == NULL,
+		"and the valid one was still left — which emptied it");
+}
+
 void	runCommandChannelTests(void)
 {
 	testModeErrors();
@@ -701,4 +874,9 @@ void	runCommandChannelTests(void)
 	testJoinInviteGate();
 	testJoinLimitGate();
 	testGateOrder();
+	testPartErrors();
+	testPartBroadcast();
+	testChannelDisappearsWhenEmpty();
+	testChannelSurvivesLosingItsOperator();
+	testPartSeveralChannels();
 }

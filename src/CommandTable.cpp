@@ -36,7 +36,7 @@ CommandTable	buildCommandTable()
 	// enabled one at a time and never speculatively.
 	//
 	table["JOIN"] = &cmdJoin;
-	// table["PART"] = &cmdPart;
+	table["PART"] = &cmdPart;
 	// table["PRIVMSG"] = &cmdPrivmsg;
 	// table["KICK"] = &cmdKick;
 	// table["INVITE"] = &cmdInvite;

@@ -116,7 +116,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `cmdJoin` — sequência `JOIN`/`332`/`353`/`366` | ~~DOMAIN~~ Eduardo | done (passo 1; o `353` é quebrado em várias linhas quando passa de 510) |
 | `cmdJoin` — múltiplos canais (`#a,#b key1,key2`) | ~~DOMAIN~~ Eduardo | done (passo 2; chaves posicionais, campo vazio preservado) |
 | `cmdJoin` — checagem de `+i`, `+k`, `+l` (`473`/`475`/`471`) | ~~DOMAIN~~ Eduardo | done (passo 2; ordem i→k→l, D19). Falta o caso ponta a ponta, que depende do `MODE` dos passos 9–12 |
-| `cmdPart` (+ `442`, canal vazio é removido) | DOMAIN | todo |
+| `cmdPart` (+ `442`, canal vazio é removido) | ~~DOMAIN~~ Eduardo | done (passo 3; `tests/it/part.sh`, D20) |
 | `cmdPrivmsg` — para canal | DOMAIN | todo |
 | `cmdPrivmsg` — para usuário (+ `401`, `411`, `412`) | DOMAIN | todo |
 | `cmdTopic` — ver e alterar (+ `331`, `332`, `+t` → `482`) | DOMAIN | todo |

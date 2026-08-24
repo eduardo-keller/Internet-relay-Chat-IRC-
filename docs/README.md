@@ -168,6 +168,7 @@ by hand, with the server stopped — each script starts its own:
 ./tests/it/mode.sh           # the unprompted MODE irssi sends on every connect
 ./tests/it/channel_seam.sh   # the disconnect sweep, under valgrind
 ./tests/it/join.sh           # the JOIN sequence, and two clients in one channel
+./tests/it/part.sh           # leaving, and the channel lifecycle around it
 
 for t in tests/it/*.sh; do "$t" || echo "FAILED: $t"; done
 ```

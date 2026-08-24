@@ -266,15 +266,16 @@ static void	testCommandTable(void)
 	// handlers have bodies, because registering one earlier is an undefined
 	// reference that breaks BOTH binaries. Each flips as it lands.
 	check(table.find("JOIN") != table.end(), "table: JOIN is registered");
-	check(table.find("PART") == table.end(),
-		"table: PART is not wired up yet");
+	check(table.find("PART") != table.end(), "table: PART is registered");
+	check(table.find("PRIVMSG") == table.end(),
+		"table: PRIVMSG is not wired up yet");
 	// WHO and WHOIS are registered for the same reason CAP is: irssi sends
 	// them by itself, and 421 in its status window is an error the subject
 	// forbids. See step 1.5 of docs/FASE3.md.
 	check(table.find("WHO") != table.end(), "table: WHO is registered");
 	check(table.find("WHOIS") != table.end(), "table: WHOIS is registered");
-	check(table.size() == 11,
-		"table: seven transport commands, MODE, JOIN, WHO and WHOIS");
+	check(table.size() == 12,
+		"table: seven transport, MODE, JOIN, PART, WHO and WHOIS");
 }
 
 void	runServerTests(void)

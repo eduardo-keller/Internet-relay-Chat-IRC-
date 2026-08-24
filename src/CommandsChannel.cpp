@@ -258,6 +258,105 @@ void	cmdJoin(Server &server, Client &sender, const Message &msg)
 	}
 }
 
+// One channel of a PART list.
+static void	partOneChannel(Server &server, Client &sender,
+				const std::string &name, const std::string &reason,
+				bool hasReason)
+{
+	// Empty field, empty answer — the same rule JOIN follows (D18). It names
+	// no channel, so there is nothing to refuse.
+	if (name.empty())
+		return ;
+
+	Channel	*channel = server.findChannel(name);
+
+	// NO SEPARATE VALIDITY CHECK IS NEEDED. An invalid name cannot be the name
+	// of a channel that exists, so "&foo" and "#nope" both land here, and 403
+	// is the right answer to both.
+	if (channel == NULL)
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOSUCHCHANNEL, sender.getNickname(),
+				name + " :No such channel"));
+		return ;
+	}
+
+	// 442, NOT 403, and the distinction is the whole point of having two
+	// codes: 403 says the room is not there, 442 says it is and you are not
+	// in it.
+	if (!channel->isMember(&sender))
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOTONCHANNEL, sender.getNickname(),
+				channel->getName() + " :You're not on that channel"));
+		return ;
+	}
+
+	std::string	args = channel->getName();
+
+	// NO REASON MEANS NO TRAILING PARAMETER, rather than an invented one. The
+	// client prints "has left" either way, and making one up would be putting
+	// words in the user's mouth.
+	if (hasReason)
+		args += " :" + reason;
+
+	// BROADCAST BEFORE REMOVING, and to everyone INCLUDING the leaver. Their
+	// own echo is what tells their client to close the window; remove them
+	// first and they never see it, leaving a dead channel window open in
+	// irssi. The others need it to update their nick lists.
+	server.broadcastToChannel(*channel,
+		irc::fromClient(sender.prefix(), "PART", args), NULL);
+
+	channel->removeMember(&sender);
+	channel->removeOperator(&sender);
+
+	// THE CHANNEL DIES WITH ITS LAST MEMBER, along with its topic, its modes
+	// and its key. That is what makes walking back in later a fresh channel
+	// whose creator is the operator again, rather than a resurrection of
+	// whatever state it had.
+	//
+	// AFTER THIS CALL `channel` IS A DANGLING POINTER — removeChannel deletes
+	// the object. Nothing below may touch it, which is why the name string is
+	// what gets passed rather than channel->getName().
+	if (channel->isEmpty())
+		server.removeChannel(name);
+
+	// A channel that still has members but has just lost its last operator
+	// stays opless, on purpose. Promoting whoever comes next would mean
+	// picking a winner out of a std::set ordered by memory address — which is
+	// to say at random. Real servers leave it opless too.
+}
+
+// PART <channel>{,<channel>} [<reason>]
+//
+// The list works like JOIN's, and for the same reason: one bad name does not
+// cancel the rest. The single reason, if there is one, applies to every channel
+// in the list — that is the protocol's shape, not a simplification.
+void	cmdPart(Server &server, Client &sender, const Message &msg)
+{
+	if (msg.params.empty())
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NEEDMOREPARAMS, sender.getNickname(),
+				"PART :Not enough parameters"));
+		return ;
+	}
+
+	const std::vector<std::string>	names = utils::split(msg.params[0], ',');
+	const bool						hasReason = msg.params.size() > 1;
+	const std::string				reason = hasReason ? msg.params[1]
+										: std::string();
+
+	for (std::vector<std::string>::size_type i = 0; i < names.size(); ++i)
+	{
+		// As in cmdJoin: a full SendQ marks the sender mid-list, and there is
+		// no point queueing the rest onto a client about to be reaped.
+		if (sender.isDisconnecting())
+			return ;
+		partOneChannel(server, sender, names[i], reason, hasReason);
+	}
+}
+
 // MODE, in the smallest form that keeps irssi's status window clean.
 //
 // Step 0.6 of docs/FASE3.md. It answers the QUERY and changes nothing; the

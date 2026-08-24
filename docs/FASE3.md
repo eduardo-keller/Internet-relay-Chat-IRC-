@@ -103,6 +103,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | D13 | `PRIVMSG` para canal de quem não é membro | `404 ERR_CANNOTSENDTOCHAN`. Não implementamos `+n`, mas deixar um estranho falar num canal em que não está é pior do que recusar, e o `404` já está na tabela | aceita 2026-08-24 |
 | D14 | `JOIN 0` (sair de todos os canais) | **Não implementado.** `0` reprova em `isValidChannelName` e ganha `403 ERR_NOSUCHCHANNEL`. Está fora da lista do subject, e o irssi manda `PART` explícito | aceita 2026-08-24 |
 | D15 | `WHO` / `WHOIS` / outros que o irssi mandar sozinho | **CORRIGIDA no Passo 1 — a primeira versão estava errada.** O irssi 1.4.5 manda sozinho: `CAP LS 302`, **`JOIN :`** (lista vazia, antes até do `CAP END`), `CAP END`, `PASS`, `NICK`, `USER`, `MODE <nick> +i`, `MODE <canal>` após cada `JOIN`, `PING` no timer — **e também `WHO <canal>` e `WHOIS <nick>`**. A captura do Passo 0 tinha **um cliente só e um canal vazio**, e nessas condições o `WHO`/`WHOIS` não aparece; com dois clientes num canal, aparece, e vira `421 :Unknown command` na janela de status dos dois. Uma amostra de um cliente não descreve o comportamento de dois — a lição a levar para o Passo 13. Tratamento pendente: **Passo 1.5** | corrigida 2026-08-24 |
+| D20 | Canal que perde o último operador | **Fica sem operador nenhum.** Promover automaticamente o próximo escolheria alguém de dentro de um `std::set` ordenado por endereço de memória — ao acaso, e diferente entre execuções. Os servidores reais deixam sem operador, e quem quiser reabrir o canal pode esvaziá-lo e entrar de novo | aceita 2026-08-24 |
 | D19 | Ordem dos portões do `JOIN`, e o alcance do convite | **`+i` → `+k` → `+l`**: um canal pode ter os três, só um numeric volta, e o que volta deve ser a razão mais específica. `+i` é uma afirmação sobre *quem* entra, então vem antes de uma chave que o cliente poderia ter mandado e de um limite que muda sozinho — é também a ordem dos servidores implantados. **O convite abre o `+i` e mais nada:** quem foi convidado ainda apresenta a chave e ainda espera vaga, senão qualquer operador poderia dar entrada num canal com chave sem saber a chave. O convite é gasto **só na entrada bem-sucedida**; gastá-lo numa tentativa recusada deixaria uma chave errada queimar o convite de alguém | aceita 2026-08-24 |
 | D18 | `JOIN` com lista de canais **vazia** (`JOIN :`) | **Silêncio**, sem numeric. O irssi manda essa linha sozinho em toda conexão — confirmado com perfil recém-criado, e visível também na captura contra o servidor-mock, então não é resíduo de configuração. `403` ou `461` ali poriam uma linha de erro na janela de status de todo mundo que conecta, que é o que o subject proíbe. **`JOIN` sem parâmetro nenhum continua `461`**: essa forma nenhum cliente manda, e é erro de quem digita no `nc`. A assimetria é medida, não inventada | aceita 2026-08-24 |
 | D16 | Tamanho de tópico | Sem constante nova em `Limits.hpp`. O único teto é a truncagem em 510 do `sendToClient`, que já cobre o caso do prefixo empurrar a linha para fora do limite | aceita 2026-08-24 |
@@ -120,7 +121,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | 1 | `cmdJoin` — canal novo, `JOIN`/`332`/`353`/`366` | `/join #test` abre a janela **com a lista de nicks** | **done** 2026-08-24 |
 | 1.5 | `WHO` / `WHOIS` — o `421` que só aparece com dois clientes | **duas janelas de status limpas; zero `421` no fio** | **done** 2026-08-24 |
 | 2 | `cmdJoin` — múltiplos canais e portões `+i`/`+k`/`+l` | `/join #a,#b` abre **duas** janelas; `473`/`475`/`471` | **done** 2026-08-24 |
-| 3 | `cmdPart` | dois irssi, um sai, o outro vê; canal vazio some | todo |
+| 3 | `cmdPart` | dois irssi, um sai, o outro vê; canal vazio some | **done** 2026-08-24 |
 | 4 | `cmdPrivmsg` para canal | conversa entre dois irssi | todo |
 | 5 | `cmdPrivmsg` para usuário | `/msg bob oi` abre janela no bob | todo |
 | 6 | `cmdTopic` | `/topic` mostra e altera; `+t` bloqueia | todo |
@@ -647,9 +648,10 @@ PART sem razão              -> formato sem trailing (ou razão default — trav
 operador sai, sobra um membro -> o canal continua, e o que sobrou NÃO ganha op
 ```
 
-O último caso merece pergunta explícita antes de virar teste: **um canal que
-perde o último operador continua sem operador nenhum.** É o comportamento dos
-servidores reais e é o mais simples de defender.
+**Um canal que perde o último operador continua sem operador nenhum** (D20).
+A alternativa — promover quem vier a seguir — escolhe o sortudo de dentro de um
+`std::set` ordenado por endereço de memória, ou seja, ao acaso. Os servidores
+reais deixam sem operador.
 
 ### Integração — `tests/it/part.sh` (novo)
 
@@ -657,10 +659,25 @@ Dois clientes, um sai, o outro tem que ver a linha `PART`. Depois os dois saem
 e um terceiro entra: ele tem que virar **operador**, provando que o canal foi
 mesmo destruído e recriado.
 
-### Pronto quando
+### Pronto quando — cumprido em 2026-08-24
 
-Dois irssi: `/part` fecha a janela de quem saiu e imprime a saída na janela de
-quem ficou.
+`make test` em **502 asserções**, `tests/it/part.sh` com 14 casos, e no irssi
+com dois clientes: quem sai tem a janela fechada, quem fica lê
+`has left #test`. Zero `421`/`403`/`442` no fio.
+
+### Um bug no próprio teste, que valeu mais que o passo
+
+Três casos do `part.sh` falhavam com o servidor **correto**. A causa era o
+helper `talk`: ele faz `exec 3<>` no shell que o executa, e dentro de `$( )`
+isso é um subshell, então a conexão morre junto. Este script foi o primeiro a
+chamar `talk` pelo efeito colateral (`talk ... > /dev/null`), no **shell
+principal** — e aí o socket ficou aberto pelo resto da execução, registrado e
+segurando o nick. Todo cliente seguinte que pedia o mesmo nick levava `433`,
+nunca registrava, e o `JOIN`/`PART` dele voltava `451`.
+
+**Parecia um `PART` quebrado. Era um descritor vazado no teste.** O `talk` do
+`part.sh` agora roda o corpo num subshell, seguro por construção; os outros
+oito scripts usam sempre dentro de `$( )` e não têm o problema (conferido).
 
 ---
 
