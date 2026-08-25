@@ -9,10 +9,9 @@
 # so with objects on the stack the target is never found and only the 401 is
 # provable.
 #
-# The +i case — an invited client walking into an invite-only channel while an
-# uninvited one is refused — needs MODE to set the mode, and comes back here in
-# step 10. What is reachable now is everything else: the numerics, the 341 that
-# decision D8 fixes the order of, and the INVITE line itself.
+# Since step 9, MODE can set +i, so the case this file was written around is
+# finally here end to end: an invited client walks into an invite-only channel
+# while an uninvited one is refused, and the invitation is spent on the way in.
 
 PORT=${1:-6717}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -162,6 +161,31 @@ sleep 1
 check "o nick do convidado e casado ignorando maiusculas" \
 	":anfitria!anfitria@127.0.0.1 INVITE convidado :#festa" \
 	"$(seen "$OUTB" | grep 'INVITE convidado' | tail -1)"
+
+# 6. THE WHOLE POINT OF INVITE, end to end. The host closes the channel, an
+#    uninvited client is refused, the guest is invited and gets in.
+printf 'MODE #festa +i\r\n' >&4
+sleep 1
+check "sem convite, o canal +i recusa -> 473" \
+	"1" "$(talk "$REG"'JOIN #festa\r\n' | grep -c ' 473 zeca #festa :Cannot join channel (+i)')"
+
+printf 'INVITE convidado #festa\r\n' >&4
+sleep 1
+printf 'JOIN #festa\r\n' >&5
+sleep 1
+check "com convite, entra no canal +i" \
+	":ircserv 366 convidado #festa :End of /NAMES list" \
+	"$(seen "$OUTB" | grep ' 366 convidado #festa ' | tail -1)"
+
+#    THE INVITATION IS SPENT. Leaving and walking back in without a fresh one
+#    must fail, or +i means nothing after the first visit.
+printf 'PART #festa\r\n' >&5
+sleep 1
+printf 'JOIN #festa\r\n' >&5
+sleep 1
+check "o convite foi consumido: voltar sem novo convite -> 473" \
+	":ircserv 473 convidado #festa :Cannot join channel (+i)" \
+	"$(seen "$OUTB" | grep ' 473 ' | tail -1)"
 
 kill -0 "$SRV" 2>/dev/null && ALIVE=vivo || ALIVE=MORTO
 check "servidor continua vivo no fim" "vivo" "$ALIVE"

@@ -122,13 +122,13 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `cmdTopic` — ver e alterar (+ `331`, `332`, `+t` → `482`) | ~~DOMAIN~~ Eduardo | done (passo 6; `tests/it/topic.sh`. O `482` sob `+t` é unidade até o `MODE` ligar modos) |
 | `cmdKick` (+ `441`, `442`, `482`) | ~~DOMAIN~~ Eduardo | done (passo 7; `tests/it/kick.sh`, alvo resolvido por D10) |
 | `cmdInvite` (+ `341`, `401`, `443`, `482`) | ~~DOMAIN~~ Eduardo | done (passo 8; `tests/it/invite.sh`. Canal inexistente → `442`, D21) |
-| `cmdMode` — parser de flags (`+it`, `-ik`, params) | DOMAIN | todo |
-| `cmdMode` — `i` | DOMAIN | todo |
-| `cmdMode` — `t` | DOMAIN | todo |
-| `cmdMode` — `k` | DOMAIN | todo |
-| `cmdMode` — `o` | DOMAIN | todo |
-| `cmdMode` — `l` | DOMAIN | todo |
-| `cmdMode` — consulta (`324`) e flag desconhecida (`472`) | ~~DOMAIN~~ Eduardo | **parcial** — o `324` e o silêncio em alvo não-canal entraram no passo 0.6 da Fase 3 (`tests/it/mode.sh`); o `472` fica para o passo 9 |
+| `cmdMode` — parser de flags (`+it`, `-ik`, params) | ~~DOMAIN~~ Eduardo | done (passos 9–12; consumo posicional testado à parte) |
+| `cmdMode` — `i` | ~~DOMAIN~~ Eduardo | done (passos 9–12; regressão com o portão do `JOIN`) |
+| `cmdMode` — `t` | ~~DOMAIN~~ Eduardo | done (passos 9–12; regressão com o `482` do `TOPIC`) |
+| `cmdMode` — `k` | ~~DOMAIN~~ Eduardo | done (passos 9–12; regressão com o `475` do `JOIN`) |
+| `cmdMode` — `o` | ~~DOMAIN~~ Eduardo | done (passos 9–12; alvo por varredura de membros, D10; `441`) |
+| `cmdMode` — `l` | ~~DOMAIN~~ Eduardo | done (passos 9–12; parâmetro absurdo ignorado, D12; `471`) |
+| `cmdMode` — consulta (`324`) e flag desconhecida (`472`) | ~~DOMAIN~~ Eduardo | done (`324` no passo 0.6, `472` nos passos 9–12) |
 | Confirmar `341` e `366` contra o irssi e anotar no `ARCHITECTURE.md` | Eduardo | **done** — `366` no passo 1 (D9) e `341` no passo 8 (D8, `Inviting edu_k_ to #festa`); ambos anotados no `ARCHITECTURE.md` §6 |
 
 ---

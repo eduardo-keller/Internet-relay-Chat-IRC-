@@ -127,10 +127,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | 6 | `cmdTopic` | `/topic` mostra e altera; `+t` bloqueia | **done** 2026-08-24 |
 | 7 | `cmdKick` | `/kick` tira o alvo da janela dele | **done** 2026-08-24 |
 | 8 | `cmdInvite` | `/invite` entrega o convite; **D8 confirmada no irssi** | **done** 2026-08-24 |
-| 9 | `cmdMode` — parser, consulta `324`, `472` | `/mode #c` mostra os modos | todo |
-| 10 | `cmdMode` — `i` e `t` | `+i` fecha o canal, `+t` tranca o tópico | todo |
-| 11 | `cmdMode` — `k` e `l` | chave e limite ligam e desligam | todo |
-| 12 | `cmdMode` — `o` | `/op` e `/deop` entre dois irssi | todo |
+| 9–12 | `cmdMode` — parser e as cinco flags (feitos como um só) | `/mode +t`, `/op`, `+k`, `+l`, `+i` no irssi | **done** 2026-08-24 |
 | 13 | Convergência final e fechamento | dois irssi, valgrind limpo, docs atualizados | todo |
 
 ---
@@ -914,7 +911,46 @@ o modo e entra no Passo 10.
 
 ---
 
-## 14. Passo 9 — `cmdMode`: parser, consulta e flag desconhecida
+## 14. Passos 9 a 12 — `cmdMode`: o parser e as cinco flags
+
+> **Feitos como um passo só, e a razão é técnica.** A máquina de consumo
+> posicional de parâmetros existe **apenas** por causa de `+k`, `+l` e `+o`:
+> um passo que implementasse `i` e `t` sozinhos a deixaria sem uso e sem teste,
+> e o passo seguinte a reescreveria. Pior, deixar `k`/`l`/`o` de fora nesse meio
+> tempo faria o servidor responder `472 :is unknown mode char to me` sobre
+> flags que são perfeitamente conhecidas — outra resposta errada no ar por um
+> passo inteiro, como teria acontecido com o `PRIVMSG` nos passos 4 e 5.
+>
+> **A granularidade foi para os testes:** uma função de teste por flag, mais
+> uma só para o consumo de parâmetros, que é onde esse parser costuma errar.
+
+### Pronto quando — cumprido em 2026-08-24
+
+`make test` em **598 asserções**, `tests/it/mode.sh` com 25 casos e
+`tests/it/invite.sh` com 14, e no irssi:
+
+```
+-!- mode/#test [+t] by edu_k
+-!- mode/#test [+o edu_k_] by edu_k
+-!- mode/#test [+k segredo] by edu_k
+[@edu_k_] [2:127/#test(+kt)]
+```
+
+O segundo cliente ganhou o `@` de operador e o irssi passou a rastrear
+`(+kt)` na barra de status.
+
+### O que este passo destravou nos anteriores
+
+Três casos que os passos 2, 6 e 8 tiveram de deixar em aberto, porque **só o
+`MODE` liga um modo pelo socket**, agora são ponta a ponta:
+
+- os portões `+i`/`+k`/`+l` do `JOIN` (Passo 2) — `473`, `475`, `471`;
+- o `482` do `TOPIC` sob `+t` (Passo 6);
+- o ciclo inteiro do convite (Passo 8): canal `+i` recusa quem não foi
+  convidado, aceita quem foi, e **o convite é consumido** — voltar depois de um
+  `PART` exige convite novo.
+
+### O contrato do parser
 
 O `MODE` é o comando mais escorregadio da fase, então ele vem em **quatro**
 passos, e este primeiro **não muda modo nenhum**.

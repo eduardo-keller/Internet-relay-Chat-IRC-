@@ -49,6 +49,29 @@ static bool	contains(const std::string &haystack, const std::string &needle)
 	return (haystack.find(needle) != std::string::npos);
 }
 
+// How many times `needle` appears in `haystack`. "Exactly once" is the
+// assertion that matters for a nick inside a NAMES reply; "at least once"
+// would pass even when the name is duplicated across two lines.
+static int	countOf(const std::string &haystack, const std::string &needle)
+{
+	int						count = 0;
+	std::string::size_type	pos = haystack.find(needle);
+
+	while (pos != std::string::npos)
+	{
+		++count;
+		pos = haystack.find(needle, pos + needle.size());
+	}
+	return (count);
+}
+
+static Client	*makeUser(Client &c, const std::string &nick)
+{
+	c.setNickname(nick);
+	c.setUsername(nick);
+	return (&c);
+}
+
 // The minimal MODE of step 0.6: it answers the query and refuses nothing else.
 // Changing modes arrives in steps 9 to 12.
 static void	testModeErrors(void)
@@ -158,49 +181,281 @@ static void	testModeQuery(void)
 		"the lookup ignores case and the reply keeps the original spelling");
 }
 
-// Changing modes is steps 9 to 12. Until then a change request must not be
-// answered with a guess: no 472, which means "unknown flag", and no 482, which
-// claims a permission decision this step does not yet know how to make.
-static void	testModeChangeIsNotImplementedYet(void)
+// --- steps 9 to 12: changing modes ---------------------------------------
+
+static void	testModePrivilegeAndUnknownFlag(void)
 {
 	Server	server(6667, "secret");
-	Client	member(-1, "localhost");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
 
-	member.setNickname("alice");
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
 
-	Channel	*channel = server.getOrCreateChannel("#room");
+	Channel	*channel = server.findChannel("#room");
 
-	channel->addMember(&member);
-	channel->addOperator(&member);
+	feed(server, bob, "MODE #room +i");
+	check(contains(bob.getOutputBuffer(),
+			" 482 bob #room :You're not channel operator"),
+		"a plain member changing a mode is 482");
+	check(!channel->isInviteOnly(), "and nothing changed");
 
-	feed(server, member, "MODE #room +i");
-	checkEqual(member.getOutputBuffer(), "",
-		"a mode CHANGE is silent for now — steps 9 to 12 implement it");
-	check(!channel->isInviteOnly(),
-		"and it changes nothing yet");
+	feed(server, alice, "MODE #room +z");
+	check(contains(alice.getOutputBuffer(),
+			" 472 alice z :is unknown mode char to me"),
+		"a flag outside itkol is 472");
+
+	// AN UNKNOWN FLAG DOES NOT ABORT THE REST OF THE STRING. The client asked
+	// for two things; refusing the one we understand because of the one we do
+	// not is worse service than the error alone.
+	feed(server, alice, "MODE #room +zi");
+	check(channel->isInviteOnly(),
+		"the flags around an unknown one are still applied");
 }
 
-// How many times `needle` appears in `haystack`. "Exactly once" is the
-// assertion that matters for a nick inside a NAMES reply; "at least once"
-// would pass even when the name is duplicated across two lines.
-static int	countOf(const std::string &haystack, const std::string &needle)
+static void	testModeInviteOnlyAndTopicLock(void)
 {
-	int						count = 0;
-	std::string::size_type	pos = haystack.find(needle);
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
 
-	while (pos != std::string::npos)
-	{
-		++count;
-		pos = haystack.find(needle, pos + needle.size());
-	}
-	return (count);
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+
+	Channel	*channel = server.findChannel("#room");
+
+	feed(server, alice, "MODE #room +i");
+	check(channel->isInviteOnly(), "+i sets invite-only");
+	check(contains(bob.getOutputBuffer(),
+			":alice!alice@localhost MODE #room +i\r\n"),
+		"and the change is broadcast to the channel");
+	check(contains(alice.getOutputBuffer(),
+			":alice!alice@localhost MODE #room +i\r\n"),
+		"including back to the operator who made it");
+
+	feed(server, alice, "MODE #room -i");
+	check(!channel->isInviteOnly(), "-i clears it");
+
+	feed(server, alice, "MODE #room +t");
+	check(channel->isTopicRestricted(), "+t locks the topic to operators");
+	feed(server, alice, "MODE #room -t");
+	check(!channel->isTopicRestricted(), "-t unlocks it");
+
+	// SEVERAL FLAGS IN ONE STRING, and one broadcast for the lot.
+	const std::string	before = bob.getOutputBuffer();
+
+	feed(server, alice, "MODE #room +it");
+	check(channel->isInviteOnly() && channel->isTopicRestricted(),
+		"+it sets both");
+	check(contains(bob.getOutputBuffer().substr(before.size()),
+			"MODE #room +it"),
+		"and both travel in a single MODE line");
+
+	// The sign changes mid-string, and the line reports what happened.
+	const std::string	before2 = bob.getOutputBuffer();
+
+	feed(server, alice, "MODE #room -i+t");
+	check(!channel->isInviteOnly() && channel->isTopicRestricted(),
+		"a sign change mid-string is honoured");
+	check(contains(bob.getOutputBuffer().substr(before2.size()),
+			"MODE #room -i+t"),
+		"and the broadcast carries both signs");
 }
 
-static Client	*makeUser(Client &c, const std::string &nick)
+// THE REGRESSION THAT CLOSES THE CIRCLE WITH STEP 2. Until now +i and +l were
+// only ever set through the Channel API in a test. Now MODE sets them, and the
+// JOIN gates have to answer to that.
+static void	testModeThenJoinGate(void)
 {
-	c.setNickname(nick);
-	c.setUsername(nick);
-	return (&c);
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+	feed(server, alice, "JOIN #room");
+	feed(server, alice, "MODE #room +i");
+
+	Client	stranger(-1, "localhost");
+
+	makeUser(stranger, "stranger");
+	feed(server, stranger, "JOIN #room");
+	check(contains(stranger.getOutputBuffer(), " 473 stranger #room "),
+		"a channel made +i by MODE refuses an uninvited JOIN");
+
+	feed(server, alice, "INVITE stranger #room");
+	server.findChannel("#room")->addInvite(&stranger);
+	feed(server, stranger, "JOIN #room");
+	check(server.findChannel("#room")->isMember(&stranger),
+		"and lets an invited one in");
+}
+
+static void	testModeKey(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+	feed(server, alice, "JOIN #room");
+
+	Channel	*channel = server.findChannel("#room");
+
+	// +k WITHOUT A PARAMETER IS 461. There is no key to set, and picking one
+	// would be inventing a password for a channel.
+	feed(server, alice, "MODE #room +k");
+	check(contains(alice.getOutputBuffer(),
+			" 461 alice MODE :Not enough parameters"),
+		"+k with no key is 461");
+	check(!channel->hasKey(), "and no key is set");
+
+	feed(server, alice, "MODE #room +k segredo");
+	check(channel->hasKey() && channel->getKey() == "segredo",
+		"+k sets the key");
+
+	Client	stranger(-1, "localhost");
+
+	makeUser(stranger, "stranger");
+	feed(server, stranger, "JOIN #room");
+	check(contains(stranger.getOutputBuffer(), " 475 stranger #room "),
+		"and the JOIN gate starts refusing without it");
+
+	// -k TAKES NO PARAMETER. Removing a key does not require producing it.
+	feed(server, alice, "MODE #room -k");
+	check(!channel->hasKey(), "-k clears the key with no parameter");
+	feed(server, stranger, "JOIN #room");
+	check(channel->isMember(&stranger), "and the channel is open again");
+}
+
+static void	testModeLimit(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+	feed(server, alice, "JOIN #room");
+
+	Channel	*channel = server.findChannel("#room");
+
+	feed(server, alice, "MODE #room +l");
+	check(contains(alice.getOutputBuffer(),
+			" 461 alice MODE :Not enough parameters"),
+		"+l with no number is 461");
+
+	feed(server, alice, "MODE #room +l 2");
+	check(channel->hasUserLimit() && channel->getUserLimit() == 2,
+		"+l sets the limit");
+
+	// D12: A PARAMETER THAT IS PRESENT BUT ABSURD IS IGNORED IN SILENCE. There
+	// is no numeric in the table for "that is not a number", and inventing one
+	// is forbidden by ARCHITECTURE.md section 10.
+	feed(server, alice, "MODE #room +l abc");
+	check(channel->getUserLimit() == 2, "a non-numeric limit is ignored");
+	feed(server, alice, "MODE #room +l 0");
+	check(channel->getUserLimit() == 2, "and so is zero");
+	feed(server, alice, "MODE #room +l -5");
+	check(channel->getUserLimit() == 2, "and so is a negative number");
+
+	Client	second(-1, "localhost");
+	Client	third(-1, "localhost");
+
+	makeUser(second, "second");
+	makeUser(third, "third");
+	feed(server, second, "JOIN #room");
+	feed(server, third, "JOIN #room");
+	check(contains(third.getOutputBuffer(), " 471 third #room "),
+		"the third client meets the limit of two");
+
+	feed(server, alice, "MODE #room -l");
+	check(!channel->hasUserLimit(), "-l removes it with no parameter");
+	feed(server, third, "JOIN #room");
+	check(channel->isMember(&third), "and the queue moves");
+}
+
+static void	testModeOperator(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+
+	Channel	*channel = server.findChannel("#room");
+
+	feed(server, alice, "MODE #room +o");
+	check(contains(alice.getOutputBuffer(),
+			" 461 alice MODE :Not enough parameters"),
+		"+o with no nickname is 461");
+
+	// 441, NOT 401 — decision D10 again. The target is resolved by scanning
+	// the channel's members, which is both the right question and what keeps
+	// this testable without a socket.
+	feed(server, alice, "MODE #room +o ninguem");
+	check(contains(alice.getOutputBuffer(),
+			" 441 alice ninguem #room :They aren't on that channel"),
+		"promoting somebody who is not in the channel is 441");
+
+	feed(server, alice, "MODE #room +o bob");
+	check(channel->isOperator(&bob), "+o promotes a member");
+	check(contains(bob.getOutputBuffer(),
+			":alice!alice@localhost MODE #room +o bob\r\n"),
+		"and the promotion is broadcast, naming the target");
+
+	// The new operator can now do operator things.
+	feed(server, bob, "MODE #room +t");
+	check(channel->isTopicRestricted(), "and the new operator can use it");
+
+	feed(server, alice, "MODE #room -o bob");
+	check(!channel->isOperator(&bob), "-o demotes");
+	feed(server, bob, "MODE #room -t");
+	check(channel->isTopicRestricted(), "and the demoted member is refused");
+
+	// AN OPERATOR MAY DEMOTE THEMSELVES, and the channel is then left with no
+	// operator at all — the same outcome D20 accepts when one leaves.
+	feed(server, alice, "MODE #room -o alice");
+	check(!channel->isOperator(&alice), "an operator can stand down");
+}
+
+// PARAMETERS ARE CONSUMED LEFT TO RIGHT, AND ONLY BY THE FLAGS THAT TAKE ONE.
+// This is where a mode parser usually goes wrong, so it gets its own test.
+static void	testModeParameterConsumption(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+
+	Channel	*channel = server.findChannel("#room");
+
+	feed(server, alice, "MODE #room +kl segredo 10");
+	check(channel->getKey() == "segredo" && channel->getUserLimit() == 10,
+		"+kl takes two parameters, in order");
+
+	// -k TAKES NONE, so the number after it belongs to +l and not to -k.
+	feed(server, alice, "MODE #room -k+l 25");
+	check(!channel->hasKey() && channel->getUserLimit() == 25,
+		"-k consumes nothing, so the parameter goes to +l");
+
+	feed(server, alice, "MODE #room +ko outra bob");
+	check(channel->getKey() == "outra" && channel->isOperator(&bob),
+		"+ko takes a key and then a nickname");
+
+	// A flag that needs a parameter with none left is 461, and the flags
+	// before it still applied.
+	feed(server, alice, "MODE #room -o+k bob");
+	check(!channel->isOperator(&bob),
+		"-o consumed the nickname");
+	check(contains(alice.getOutputBuffer(),
+			" 461 alice MODE :Not enough parameters"),
+		"and +k, left with nothing, is 461");
 }
 
 static void	testJoinErrors(void)
@@ -1338,7 +1593,13 @@ void	runCommandChannelTests(void)
 	testModeErrors();
 	testUserModeIsIgnoredSilently();
 	testModeQuery();
-	testModeChangeIsNotImplementedYet();
+	testModePrivilegeAndUnknownFlag();
+	testModeInviteOnlyAndTopicLock();
+	testModeThenJoinGate();
+	testModeKey();
+	testModeLimit();
+	testModeOperator();
+	testModeParameterConsumption();
 	testJoinErrors();
 	testJoinWithEmptyChannelListIsSilent();
 	testJoinCreatesChannel();

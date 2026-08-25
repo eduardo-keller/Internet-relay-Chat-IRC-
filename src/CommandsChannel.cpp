@@ -729,6 +729,186 @@ void	cmdInvite(Server &server, Client &sender, const Message &msg)
 			target->getNickname() + " :" + channel->getName()));
 }
 
+// Accumulates the changes that were actually applied, so that the broadcast
+// reports what happened rather than what was asked for.
+//
+// The distinction is not pedantic: "MODE #c +zi" asks for two things, one of
+// which does not exist, and relaying "+zi" would tell the whole channel that a
+// mode named z is now set. The sign is only emitted when it CHANGES, which is
+// what turns three separate applications into "-i+t" rather than "-i+t+t".
+struct ModeAccumulator
+{
+	std::string	flags;
+	std::string	params;
+	char		sign;
+
+	ModeAccumulator() : flags(), params(), sign(0) {}
+
+	void	add(bool adding, char flag, const std::string &param)
+	{
+		const char	wanted = adding ? '+' : '-';
+
+		if (sign != wanted)
+		{
+			flags += wanted;
+			sign = wanted;
+		}
+		flags += flag;
+		if (!param.empty())
+			params += " " + param;
+	}
+};
+
+// The mode string parser, and the five flags behind it.
+//
+// STEPS 9 TO 12 OF docs/FASE3.md, DONE AS ONE. The plan had the parser and then
+// one flag per step, and splitting it that way would have been worse: the
+// positional parameter machinery exists ONLY for +k, +l and +o, so a step that
+// implemented i and t alone would leave it unused and untested and the next
+// step would rewrite it. Leaving k, l and o out meanwhile would have the server
+// answer "472 :is unknown mode char to me" about flags that are perfectly well
+// known. The granularity moved into the tests instead: one function per flag.
+//
+// Parameters are consumed LEFT TO RIGHT and only by the flags that take one
+// (ARCHITECTURE.md section 8): +k, +l, +o and -o take one; -k, -l, i and t do
+// not. Removing a mode that carries a value does not require producing the
+// value again.
+static void	applyModeChanges(Server &server, Client &sender, Channel &channel,
+				const Message &msg)
+{
+	const std::string	&nick = sender.getNickname();
+
+	// THE PRIVILEGE CHECK COVERS THE WHOLE STRING, once, before anything is
+	// applied. Checking per flag would let a non-operator watch which of their
+	// requests were refused, and would apply the early ones first.
+	if (!channel.isOperator(&sender))
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_CHANOPRIVSNEEDED, nick,
+				channel.getName() + " :You're not channel operator"));
+		return ;
+	}
+
+	const std::string		&modeString = msg.params[1];
+	std::vector<std::string>::size_type	next = 2;
+	bool					adding = true;
+	ModeAccumulator			done;
+
+	for (std::string::size_type i = 0; i < modeString.size(); ++i)
+	{
+		const char	flag = modeString[i];
+
+		if (flag == '+' || flag == '-')
+		{
+			adding = (flag == '+');
+			continue ;
+		}
+
+		// Does this flag need a parameter? Only +k, +l and either sign of o.
+		const bool	needsParam = (flag == 'o')
+						|| (adding && (flag == 'k' || flag == 'l'));
+		std::string	param;
+
+		if (needsParam)
+		{
+			if (next >= msg.params.size())
+			{
+				// 461 AND SKIP THIS FLAG, but carry on with the rest of the
+				// string: the flags already applied stay applied.
+				server.sendToClient(sender, irc::numeric(
+						server.getServerName(), irc::ERR_NEEDMOREPARAMS, nick,
+						"MODE :Not enough parameters"));
+				continue ;
+			}
+			param = msg.params[next];
+			++next;
+		}
+
+		if (flag == 'i')
+		{
+			channel.setInviteOnly(adding);
+			done.add(adding, 'i', "");
+		}
+		else if (flag == 't')
+		{
+			channel.setTopicRestricted(adding);
+			done.add(adding, 't', "");
+		}
+		else if (flag == 'k')
+		{
+			if (adding)
+				channel.setKey(param);
+			else
+				channel.clearKey();
+			done.add(adding, 'k', param);
+		}
+		else if (flag == 'l')
+		{
+			if (!adding)
+			{
+				channel.clearUserLimit();
+				done.add(false, 'l', "");
+			}
+			else
+			{
+				int	limit = 0;
+
+				// DECISION D12: a parameter that is present but absurd is
+				// ignored in silence. There is no numeric in the agreed table
+				// for "that is not a number", and inventing one is forbidden
+				// by ARCHITECTURE.md section 10. utils::parseInt refuses
+				// rather than guesses, which is why it exists — atoi("12x")
+				// would have said 12.
+				if (utils::parseInt(param, limit) && limit > 0)
+				{
+					channel.setUserLimit(static_cast<std::size_t>(limit));
+					done.add(true, 'l', param);
+				}
+			}
+		}
+		else if (flag == 'o')
+		{
+			// Resolved by scanning the members, not findClientByNick — the
+			// same decision D10 that KICK follows, for the same two reasons.
+			Client	*target = findMemberByNick(channel, param);
+
+			if (target == NULL)
+			{
+				server.sendToClient(sender, irc::numeric(
+						server.getServerName(), irc::ERR_USERNOTINCHANNEL,
+						nick, param + " " + channel.getName()
+						+ " :They aren't on that channel"));
+				continue ;
+			}
+			if (adding)
+				channel.addOperator(target);
+			else
+				channel.removeOperator(target);
+			// The target's OWN spelling, so the line names them as they are
+			// known rather than as they were typed.
+			done.add(adding, 'o', target->getNickname());
+		}
+		else
+		{
+			// UNKNOWN FLAGS DO NOT ABORT THE STRING. The client asked for
+			// several things; refusing the ones we understand because of the
+			// one we do not is worse service than the error by itself.
+			server.sendToClient(sender, irc::numeric(server.getServerName(),
+					irc::ERR_UNKNOWNMODE, nick,
+					std::string(1, flag) + " :is unknown mode char to me"));
+		}
+	}
+
+	// Nothing applied, nothing to announce — which is the case for a string of
+	// nothing but unknown flags, or a +l everybody ignored.
+	if (done.flags.empty())
+		return ;
+
+	server.broadcastToChannel(channel,
+		irc::fromClient(sender.prefix(), "MODE",
+			channel.getName() + " " + done.flags + done.params), NULL);
+}
+
 // MODE, in the smallest form that keeps irssi's status window clean.
 //
 // Step 0.6 of docs/FASE3.md. It answers the QUERY and changes nothing; the
@@ -775,12 +955,11 @@ void	cmdMode(Server &server, Client &sender, const Message &msg)
 		return ;
 	}
 
-	// A mode STRING was supplied, so this is a change request. Steps 9 to 12
-	// own that. Until then the answer is silence rather than a guess: 472
-	// would claim the flag is unknown when we simply have not read it yet, and
-	// 482 would announce a permission decision this step cannot make.
 	if (msg.params.size() > 1)
+	{
+		applyModeChanges(server, sender, *channel, msg);
 		return ;
+	}
 
 	// The query. isMember decides whether the parameters travel with the
 	// flags, and the parameter that matters is the key: handing +k's key to a
