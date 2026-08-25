@@ -128,7 +128,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | 7 | `cmdKick` | `/kick` tira o alvo da janela dele | **done** 2026-08-24 |
 | 8 | `cmdInvite` | `/invite` entrega o convite; **D8 confirmada no irssi** | **done** 2026-08-24 |
 | 9–12 | `cmdMode` — parser e as cinco flags (feitos como um só) | `/mode +t`, `/op`, `+k`, `+l`, `+i` no irssi | **done** 2026-08-24 |
-| 13 | Convergência final e fechamento | dois irssi, valgrind limpo, docs atualizados | todo |
+| 13 | Convergência final e fechamento | dois irssi, valgrind limpo, docs atualizados | **done** 2026-08-24 |
 
 ---
 
@@ -1075,10 +1075,67 @@ o novo operador aparece com "@" num 353 posterior
    tests" listando os scripts novos e removendo o aviso de que o
    `channel_seam.sh` se pula sozinho.
 
-### Pronto quando
+### Cumprido em 2026-08-24
 
-Os 17 itens da Fase 3 estão `done` no `TASKS.md`, o valgrind está limpo com
-canais em uso, e a `main` recebe a branch.
+**1. Suíte inteira.** `make` do zero sem um aviso, `make test` em **598
+asserções**, e **14 scripts de integração** com 0 falhas.
+
+**2. valgrind com os comandos de canal em uso.** O novo
+`tests/it/full_session.sh` exercita a superfície toda numa só vida do servidor:
+dois canais, tópico, `+tk`, `+o`, `+il`, convite, mensagem de canal e privada,
+troca de nick com pares, um `QUIT` colado a um `PRIVMSG`, um cliente morto a
+`kill -9` **segurando membresia, badge de operador e convite**, e o
+encerramento com clientes ainda conectados e canais ainda povoados.
+
+**0 bytes perdidos direta ou indiretamente, 0 leituras ou escritas inválidas,
+0 frees inválidos.** Fecha dois itens que a lista da Fase 4 carregava: o
+valgrind "refazer com os comandos de canal" e o `QUIT` colado "repetir com
+canais quando o `JOIN` existir".
+
+**3. Dois irssi, o roteiro do `PLANO.md` §3 de ponta a ponta:** conectar,
+`/join`, conversar, `/msg` privado, `/topic`, `/mode +t` (e o `482` do outro
+lado), `/op`, `/topic` de novo já como operador, `/join` num canal `+i` (`473`),
+`/invite`, entrar, `/kick`, `/part`, `/quit`.
+
+No fio inteiro, os **únicos** numerics de erro são quatro, todos deliberados:
+
+| Código | De onde vem |
+|---|---|
+| `433` | o segundo irssi pediu o mesmo nick e se renomeou sozinho |
+| `451` ×2 | o `JOIN :` que o irssi manda antes do registro (D18) |
+| `473` | a recusa do canal `+i` antes do convite |
+| `482` | a recusa do `+t` a um não-operador |
+
+Nenhum `421`, nenhum `403`, nenhum `Unknown command` em janela de status.
+
+---
+
+## 21. Balanço da fase
+
+Onze commits, do `CAP` ao `MODE`. O que vale carregar para a Fase 4:
+
+**Três decisões da Fase 2 estavam erradas, e as três só apareceram no cliente
+real.** A D2 (`CAP` silencioso) impedia o irssi de registrar. A D15 (`WHO`/
+`WHOIS` inexistentes) foi escrita a partir de uma captura com **um** cliente
+num canal vazio. A justificativa da D18 atribuía ao nosso handler um mérito que
+era do irssi. Todas passaram por `make test` verde o tempo inteiro.
+
+> É o aviso do `ARCHITECTURE.md` §9 cobrado três vezes na mesma fase: *teste de
+> unidade prova que somos consistentes, não que estamos certos.*
+
+**Uma amostra de um cliente não descreve o comportamento de dois.** `WHO`,
+`WHOIS` e metade dos caminhos de broadcast só apareceram com duas conexões de
+verdade.
+
+**Os testes também erram, e erram de formas mais bobas que o código.** Nesta
+fase: um descritor vazado que segurava um nick e fazia todo cliente seguinte
+levar `433`; um `tr` que bufferizava a saída e deixava o arquivo vazio; âncoras
+`$` que nunca casavam por causa do `\r`; e **quatro** contagens escritas como se
+a linha idêntica anterior não existisse. Nenhum desses era bug do servidor.
+
+**O seam da Fase 2 aguentou.** Sete handlers, nenhum método novo no `Server`,
+nenhum handler tocando em fd. O `ARCHITECTURE.md` §4 continua descrevendo o
+código com exatidão — que era o objetivo do contrato.
 
 ---
 

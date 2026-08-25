@@ -138,15 +138,16 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | Item | Dono | Status |
 |---|---|---|
 | Pacote parcial via `nc -C` (teste do subject) | BOTH | done roteirizado (`tests/it/read_path.sh`); falta o `Ctrl+D` na mão |
+| `valgrind` com os comandos de canal | BOTH | **done** (Fase 3 passo 13: `tests/it/full_session.sh`, 0 perdidos, 0 inválidos) |
 | Vários comandos num pacote só | BOTH | done (`read_path.sh`, `registration.sh`) |
 | Regressão: linha > 512 truncada (implementado na Fase 1) | BOTH | done (`write_path.sh`, `hardening.sh`) |
 | `PRIVMSG` de 504 bytes + prefixo sai truncado em 510 | BOTH | **done** (Fase 3 passo 4: `tests/it/privmsg.sh` manda 480 bytes de texto e afere 510 na chegada) |
-| `QUIT` colado com outra linha no mesmo pacote | BOTH | done no passo 7 (`tests/it/session.sh`); repetir com canais quando o `JOIN` existir |
+| `QUIT` colado com outra linha no mesmo pacote | BOTH | **done** — `session.sh` sem canais e `full_session.sh` com canais, convite e badge de operador |
 | Cliente que para de ler (`Ctrl+Z` no `nc`) estoura SendQ | BOTH | done no passo 4 (cliente que não lê → `SendQ exceeded`); refazer com `Ctrl+Z` de verdade na Fase 4 |
 | Bytes NUL e lixo binário não derrubam | BOTH | done (`hardening.sh`: `/dev/urandom` e NUL no meio do comando) |
 | Cliente morto (`kill -9`) sem `QUIT` | BOTH | done (passo 2, e de novo no `hardening.sh`) |
 | Muitos clientes simultâneos | BOTH | done (50 conexões simultâneas no `hardening.sh`) |
-| `valgrind` sem vazamento | BOTH | done na trilha TRANSPORT (27 clientes conectados no SIGINT: 0 bytes, 0 erros); refazer com os comandos de canal |
+| `valgrind` sem vazamento | BOTH | **done** — refeito com os comandos de canal em `full_session.sh` |
 | Nenhum retorno de syscall ignorado | BOTH | done na trilha TRANSPORT (auditado no passo 8; só `close`/`signal` ficam de fora, com motivo no código) |
 | Ensaio: Eduardo explica a trilha DOMAIN | TRANSPORT | todo |
 | Ensaio: colega explica a trilha TRANSPORT | DOMAIN | todo |

@@ -173,6 +173,7 @@ by hand, with the server stopped — each script starts its own:
 ./tests/it/topic.sh          # reading, setting and clearing the topic
 ./tests/it/kick.sh           # the first operator command, over two live clients
 ./tests/it/invite.sh         # invitations, and the RFC 1459 order of 341
+./tests/it/full_session.sh   # the whole surface in one server lifetime, under valgrind
 
 for t in tests/it/*.sh; do "$t" || echo "FAILED: $t"; done
 ```
@@ -182,11 +183,12 @@ Each takes a port as its optional first argument, defaulting to one in the
 case and exits non-zero if anything failed, so they work in a loop like the one
 above.
 
-Two of them run the server under **valgrind** rather than plain, because the
-bug they cover is invisible otherwise: `channel_seam.sh` (a `Client` deleted
-while a `Channel` still points at it) and `session.sh` (a `QUIT` sharing a
-packet with the command after it). They need `valgrind` installed and take a
-few seconds longer.
+Three of them run the server under **valgrind** rather than plain, because the
+bugs they cover are invisible otherwise: `channel_seam.sh` (a `Client` deleted
+while a `Channel` still points at it), `session.sh` (a `QUIT` sharing a packet
+with the command after it) and `full_session.sh` (the whole surface at once —
+channels, invitations, operator sets, a `kill -9` in the middle of all three).
+They need `valgrind` installed and take a few seconds longer.
 
 `channel_seam.sh` used to **skip itself** while `JOIN` was not in the command
 table. It runs for real since phase 3 step 1, and its clients now complete
