@@ -40,7 +40,7 @@ CommandTable	buildCommandTable()
 	table["PRIVMSG"] = &cmdPrivmsg;
 	// table["KICK"] = &cmdKick;
 	// table["INVITE"] = &cmdInvite;
-	// table["TOPIC"] = &cmdTopic;
+	table["TOPIC"] = &cmdTopic;
 
 	// MODE is registered ahead of the other six, out of the order the TASKS.md
 	// list suggests, and step 0.6 of docs/FASE3.md says why: irssi sends

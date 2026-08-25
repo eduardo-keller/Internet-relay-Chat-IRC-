@@ -123,7 +123,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | 2 | `cmdJoin` — múltiplos canais e portões `+i`/`+k`/`+l` | `/join #a,#b` abre **duas** janelas; `473`/`475`/`471` | **done** 2026-08-24 |
 | 3 | `cmdPart` | dois irssi, um sai, o outro vê; canal vazio some | **done** 2026-08-24 |
 | 4 | `cmdPrivmsg` — canal **e** usuário (passos 4 e 5 juntos) | conversa entre dois irssi + `/msg` privado | **done** 2026-08-24 |
-| 6 | `cmdTopic` | `/topic` mostra e altera; `+t` bloqueia | todo |
+| 6 | `cmdTopic` | `/topic` mostra e altera; `+t` bloqueia | **done** 2026-08-24 |
 | 7 | `cmdKick` | `/kick` tira o alvo da janela dele | todo |
 | 8 | `cmdInvite` | `/invite` entra em canal `+i`; **confirma D8** | todo |
 | 9 | `cmdMode` — parser, consulta `324`, `472` | `/mode #c` mostra os modos | todo |
@@ -788,10 +788,24 @@ alteração com +t por operador      -> funciona
 TOPIC #c :   (vazio)               -> limpa, e a consulta seguinte dá 331
 ```
 
-### Pronto quando
+### Pronto quando — cumprido em 2026-08-24
 
-No irssi: `/topic` mostra, `/topic novo assunto` muda e aparece na barra dos
-dois clientes; com `+t`, um não-operador leva "You're not channel operator".
+`make test` em **533 asserções**, `tests/it/topic.sh` com 12 casos, e no irssi
+`/topic reuniao as 15h` num cliente aparece no outro como
+`edu_k changed the topic of #test to: reuniao as 15h`.
+
+Três coisas medidas que valem registrar:
+
+1. **O `/topic` sem argumento não consulta o servidor.** O irssi responde do
+   próprio cache — inclusive o `Topic set by edu_k [data]`, que ele deduz do
+   broadcast que testemunhou. Não mandamos `333` e ele não sentiu falta. O
+   caminho do `332` é exercido pelo `nc` e por quem entra depois no canal.
+2. **O `JOIN` já responde `331`**, então uma consulta logo depois produz a
+   segunda ocorrência. Duas asserções do script nasceram erradas por eu ter
+   esquecido isso — do nosso próprio `JOIN`, não do `TOPIC`.
+3. **O `+t` ainda não é alcançável ponta a ponta**, mesma limitação do Passo 2:
+   pelo socket só o `MODE` liga um modo. O `482` está coberto em unidade e
+   volta ao script quando o `MODE` souber ligar.
 
 ---
 

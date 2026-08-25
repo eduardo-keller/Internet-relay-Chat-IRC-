@@ -450,6 +450,79 @@ void	cmdPrivmsg(Server &server, Client &sender, const Message &msg)
 			recipient->getNickname() + " :" + text));
 }
 
+// TOPIC <channel> [ :<topic> ]
+//
+// THE ONE COMMAND IN THIS FILE THAT BOTH READS AND WRITES, and which it does
+// depends entirely on whether a second parameter arrived. Reading requires
+// nothing beyond membership — not operator status, and not the absence of +t.
+// +t restricts SETTING the topic and nothing else; the subject says so in as
+// many words ("Set/remove the restrictions of the TOPIC command to channel
+// operators").
+void	cmdTopic(Server &server, Client &sender, const Message &msg)
+{
+	if (msg.params.empty())
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NEEDMOREPARAMS, sender.getNickname(),
+				"TOPIC :Not enough parameters"));
+		return ;
+	}
+
+	Channel	*channel = server.findChannel(msg.params[0]);
+
+	if (channel == NULL)
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOSUCHCHANNEL, sender.getNickname(),
+				msg.params[0] + " :No such channel"));
+		return ;
+	}
+	if (!channel->isMember(&sender))
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOTONCHANNEL, sender.getNickname(),
+				channel->getName() + " :You're not on that channel"));
+		return ;
+	}
+
+	// THE QUERY. One parameter means "what is it?", and the answer depends on
+	// whether there is one.
+	if (msg.params.size() < 2)
+	{
+		if (channel->getTopic().empty())
+			server.sendToClient(sender, irc::numeric(server.getServerName(),
+					irc::RPL_NOTOPIC, sender.getNickname(),
+					channel->getName() + " :No topic is set"));
+		else
+			server.sendToClient(sender, irc::numeric(server.getServerName(),
+					irc::RPL_TOPIC, sender.getNickname(),
+					channel->getName() + " :" + channel->getTopic()));
+		return ;
+	}
+
+	// THE CHANGE, and the only place +t is consulted.
+	if (channel->isTopicRestricted() && !channel->isOperator(&sender))
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_CHANOPRIVSNEEDED, sender.getNickname(),
+				channel->getName() + " :You're not channel operator"));
+		return ;
+	}
+
+	// AN EMPTY TOPIC CLEARS IT, and that case is the reason Message keeps
+	// hasTrailing. "TOPIC #c" and "TOPIC #c :" are different lines on the
+	// wire and must do different things — ask, and erase. A parser that
+	// dropped an empty trailing parameter would collapse them into one and
+	// leave no way to clear a topic at all.
+	channel->setTopic(msg.params[1]);
+
+	// Announced to EVERY member, the setter included: their own copy is the
+	// confirmation, and everyone else's client repaints its title bar from it.
+	server.broadcastToChannel(*channel,
+		irc::fromClient(sender.prefix(), "TOPIC",
+			channel->getName() + " :" + msg.params[1]), NULL);
+}
+
 // MODE, in the smallest form that keeps irssi's status window clean.
 //
 // Step 0.6 of docs/FASE3.md. It answers the QUERY and changes nothing; the

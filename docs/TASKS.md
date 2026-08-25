@@ -119,7 +119,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `cmdPart` (+ `442`, canal vazio é removido) | ~~DOMAIN~~ Eduardo | done (passo 3; `tests/it/part.sh`, D20) |
 | `cmdPrivmsg` — para canal | ~~DOMAIN~~ Eduardo | done (passo 4; `tests/it/privmsg.sh`) |
 | `cmdPrivmsg` — para usuário (+ `401`, `411`, `412`) | ~~DOMAIN~~ Eduardo | done (passo 4, junto com o de canal) |
-| `cmdTopic` — ver e alterar (+ `331`, `332`, `+t` → `482`) | DOMAIN | todo |
+| `cmdTopic` — ver e alterar (+ `331`, `332`, `+t` → `482`) | ~~DOMAIN~~ Eduardo | done (passo 6; `tests/it/topic.sh`. O `482` sob `+t` é unidade até o `MODE` ligar modos) |
 | `cmdKick` (+ `441`, `442`, `482`) | DOMAIN | todo |
 | `cmdInvite` (+ `341`, `401`, `443`, `482`) | DOMAIN | todo |
 | `cmdMode` — parser de flags (`+it`, `-ik`, params) | DOMAIN | todo |

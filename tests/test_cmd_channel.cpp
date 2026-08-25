@@ -36,6 +36,8 @@ static void	feed(Server &server, Client &client, const std::string &line)
 		cmdPart(server, client, msg);
 	else if (msg.command == "PRIVMSG")
 		cmdPrivmsg(server, client, msg);
+	else if (msg.command == "TOPIC")
+		cmdTopic(server, client, msg);
 }
 
 static bool	contains(const std::string &haystack, const std::string &needle)
@@ -977,6 +979,153 @@ static void	testPrivmsgToUnknownUser(void)
 		"a message to a nickname nobody holds is 401");
 }
 
+// --- step 6: the topic ----------------------------------------------------
+
+static void	testTopicErrors(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+
+	feed(server, alice, "TOPIC");
+	checkEqual(alice.getOutputBuffer(),
+		":ircserv 461 alice TOPIC :Not enough parameters\r\n",
+		"TOPIC with no parameter is 461");
+
+	Client	bob(-1, "localhost");
+
+	makeUser(bob, "bob");
+	feed(server, bob, "TOPIC #nope");
+	checkEqual(bob.getOutputBuffer(),
+		":ircserv 403 bob #nope :No such channel\r\n",
+		"TOPIC on a channel that does not exist is 403");
+
+	Client	owner(-1, "localhost");
+
+	makeUser(owner, "owner");
+	feed(server, owner, "JOIN #room");
+
+	Client	outsider(-1, "localhost");
+
+	makeUser(outsider, "outsider");
+	feed(server, outsider, "TOPIC #room");
+	checkEqual(outsider.getOutputBuffer(),
+		":ircserv 442 outsider #room :You're not on that channel\r\n",
+		"a non-member cannot even read the topic here");
+}
+
+// READING IS NOT WRITING, and TOPIC is the one command in this file that does
+// both depending on its parameters. Querying requires nothing beyond
+// membership — not operator status, and not +t.
+static void	testTopicQuery(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+
+	Client	reader(-1, "localhost");
+
+	makeUser(reader, "reader");
+	feed(server, reader, "JOIN #room");
+	feed(server, reader, "TOPIC #room");
+	check(contains(reader.getOutputBuffer(),
+			":ircserv 331 reader #room :No topic is set\r\n"),
+		"a channel with no topic answers 331");
+
+	// +t restricts SETTING, never reading. A plain member under +t still gets
+	// an answer.
+	server.findChannel("#room")->setTopicRestricted(true);
+	server.findChannel("#room")->setTopic("assunto do dia");
+	feed(server, reader, "TOPIC #room");
+	check(contains(reader.getOutputBuffer(),
+			":ircserv 332 reader #room :assunto do dia\r\n"),
+		"a channel with a topic answers 332, even under +t to a plain member");
+}
+
+static void	testTopicChange(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+
+	Channel	*channel = server.findChannel("#room");
+
+	// WITHOUT +t ANY MEMBER MAY SET IT. That is the default, and it is why +t
+	// exists as a mode at all.
+	feed(server, bob, "TOPIC #room :bob mandou aqui");
+	checkEqual(channel->getTopic(), "bob mandou aqui",
+		"any member can set the topic when +t is off");
+	check(contains(alice.getOutputBuffer(),
+			":bob!bob@localhost TOPIC #room :bob mandou aqui\r\n"),
+		"and the change is announced to the channel");
+	check(contains(bob.getOutputBuffer(),
+			":bob!bob@localhost TOPIC #room :bob mandou aqui\r\n"),
+		"including back to whoever set it, as confirmation");
+
+	// Under +t, the same client is refused and the topic does not move.
+	channel->setTopicRestricted(true);
+	feed(server, bob, "TOPIC #room :tentando de novo");
+	check(contains(bob.getOutputBuffer(),
+			" 482 bob #room :You're not channel operator"),
+		"a plain member under +t is 482");
+	checkEqual(channel->getTopic(), "bob mandou aqui",
+		"and the topic is unchanged");
+
+	// The operator still can.
+	feed(server, alice, "TOPIC #room :a chefe decide");
+	checkEqual(channel->getTopic(), "a chefe decide",
+		"an operator sets it even under +t");
+
+	// A topic without a colon is still a topic — one word, no trailing marker.
+	feed(server, alice, "TOPIC #room umapalavra");
+	checkEqual(channel->getTopic(), "umapalavra",
+		"a single-word topic needs no trailing marker");
+}
+
+// CLEARING IS AN EMPTY TRAILING PARAMETER, and this is where the parser's
+// hasTrailing earns its keep: "TOPIC #c" and "TOPIC #c :" are different lines
+// on the wire, and they must do different things — ask, and erase. An
+// implementation that dropped the empty trailing would make them identical and
+// there would be no way to clear a topic at all.
+static void	testTopicClear(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+	feed(server, alice, "JOIN #room");
+
+	Channel	*channel = server.findChannel("#room");
+
+	channel->setTopic("algo escrito");
+
+	Message	clear = parseMessage("TOPIC #room :");
+
+	check(clear.params.size() == 2 && clear.params[1].empty()
+		&& clear.hasTrailing,
+		"the parser keeps the empty trailing parameter that clearing needs");
+	cmdTopic(server, alice, clear);
+	check(channel->getTopic().empty(), "an empty topic clears it");
+	check(contains(alice.getOutputBuffer(),
+			":alice!alice@localhost TOPIC #room :\r\n"),
+		"and the clearing is announced, with an empty trailing parameter");
+
+	feed(server, alice, "TOPIC #room");
+	check(contains(alice.getOutputBuffer(), " 331 alice #room "),
+		"after clearing, the query answers 331 again");
+}
+
 void	runCommandChannelTests(void)
 {
 	testModeErrors();
@@ -1003,4 +1152,8 @@ void	runCommandChannelTests(void)
 	testPrivmsgErrors();
 	testPrivmsgToChannel();
 	testPrivmsgToUnknownUser();
+	testTopicErrors();
+	testTopicQuery();
+	testTopicChange();
+	testTopicClear();
 }

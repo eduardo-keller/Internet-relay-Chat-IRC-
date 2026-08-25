@@ -269,6 +269,7 @@ static void	testCommandTable(void)
 	check(table.find("PART") != table.end(), "table: PART is registered");
 	check(table.find("PRIVMSG") != table.end(),
 		"table: PRIVMSG is registered");
+	check(table.find("TOPIC") != table.end(), "table: TOPIC is registered");
 	check(table.find("KICK") == table.end(),
 		"table: KICK is not wired up yet");
 	// WHO and WHOIS are registered for the same reason CAP is: irssi sends
@@ -276,8 +277,8 @@ static void	testCommandTable(void)
 	// forbids. See step 1.5 of docs/FASE3.md.
 	check(table.find("WHO") != table.end(), "table: WHO is registered");
 	check(table.find("WHOIS") != table.end(), "table: WHOIS is registered");
-	check(table.size() == 13,
-		"table: seven transport, MODE, JOIN, PART, PRIVMSG, WHO and WHOIS");
+	check(table.size() == 14,
+		"table: seven transport, plus MODE JOIN PART PRIVMSG TOPIC WHO WHOIS");
 }
 
 void	runServerTests(void)
