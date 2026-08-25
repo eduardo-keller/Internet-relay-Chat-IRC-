@@ -475,7 +475,7 @@ Each starts its own `ircserv` on a spare port, drives it over TCP and asserts
 on the bytes that come back. Two of them run the server under `valgrind`,
 because the bug they cover — a freed `Client` still pointed at by a `Channel`,
 and a `QUIT` sharing a packet with the next command — is silent without it.
-`docs/README.md` lists them and how to run them.
+The root [`README.md`](../README.md) lists them and how to run them.
 
 > Two of those scripts were **validated by mutation**: the defect they exist to
 > catch was deliberately reintroduced, and each was confirmed to fail. A test
