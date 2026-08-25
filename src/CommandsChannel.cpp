@@ -357,6 +357,99 @@ void	cmdPart(Server &server, Client &sender, const Message &msg)
 	}
 }
 
+// PRIVMSG <target> :<text>
+//
+// THIS IS THE COMMAND THE SUBJECT IS ACTUALLY ABOUT: "all the messages sent
+// from one client to a channel have to be forwarded to every other client that
+// joined the channel". Everything else in this file exists so that this line
+// can be delivered.
+//
+// Steps 4 and 5 of docs/FASE3.md were planned as two slices — channel first,
+// then user — and are done as one. Splitting them would mean spending a whole
+// step answering a message to a nickname with either a 401 that lies or a
+// silence that strands it, and the two paths are ten lines apart in the same
+// handler.
+void	cmdPrivmsg(Server &server, Client &sender, const Message &msg)
+{
+	// 411 NAMES THE COMMAND in its text, which is why it takes one at all:
+	// NOTICE and PRIVMSG share the code, and the client shows the string.
+	if (msg.params.empty())
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NORECIPIENT, sender.getNickname(),
+				":No recipient given (PRIVMSG)"));
+		return ;
+	}
+
+	// Both the missing parameter and the present-but-empty one, which are
+	// different messages on the wire — "PRIVMSG #c" and "PRIVMSG #c :" — and
+	// the same thing to a reader: nothing to say. Relaying an empty line to a
+	// whole channel is not a service to anybody.
+	if (msg.params.size() < 2 || msg.params[1].empty())
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOTEXTTOSEND, sender.getNickname(),
+				":No text to send"));
+		return ;
+	}
+
+	const std::string	&target = msg.params[0];
+	const std::string	&text = msg.params[1];
+
+	if (!target.empty() && target[0] == '#')
+	{
+		Channel	*channel = server.findChannel(target);
+
+		if (channel == NULL)
+		{
+			server.sendToClient(sender, irc::numeric(server.getServerName(),
+					irc::ERR_NOSUCHCHANNEL, sender.getNickname(),
+					target + " :No such channel"));
+			return ;
+		}
+
+		// DECISION D13. We implement no +n, so nothing in the mode set forbids
+		// an outsider from talking into a room they never entered — but doing
+		// it is worse than refusing, and 404 is already in the table.
+		if (!channel->isMember(&sender))
+		{
+			server.sendToClient(sender, irc::numeric(server.getServerName(),
+					irc::ERR_CANNOTSENDTOCHAN, sender.getNickname(),
+					channel->getName() + " :Cannot send to channel"));
+			return ;
+		}
+
+		// `except` IS THE SENDER, and this is the one broadcast in the file
+		// that excludes them. The asymmetry with JOIN belongs to the protocol:
+		// the client already printed what the user typed, and echoing it back
+		// would double every line on screen.
+		server.broadcastToChannel(*channel,
+			irc::fromClient(sender.prefix(), "PRIVMSG",
+				channel->getName() + " :" + text), &sender);
+		return ;
+	}
+
+	// A nickname. This is one of the two places findClientByNick belongs
+	// (D10): the target of a private message has no reason to share a channel
+	// with the sender, so scanning members would find nobody.
+	Client	*recipient = server.findClientByNick(target);
+
+	if (recipient == NULL)
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOSUCHNICK, sender.getNickname(),
+				target + " :No such nick/channel"));
+		return ;
+	}
+
+	// The target's OWN spelling of their nickname goes on the wire, not the
+	// spelling the sender typed: "PRIVMSG BOB" reaches bob as addressed to
+	// bob, which is what his client matches its query window against.
+	server.sendToClient(*recipient,
+		irc::fromClient(sender.prefix(), "PRIVMSG",
+			recipient->getNickname() + " :" + text));
+}
+
 // MODE, in the smallest form that keeps irssi's status window clean.
 //
 // Step 0.6 of docs/FASE3.md. It answers the QUERY and changes nothing; the

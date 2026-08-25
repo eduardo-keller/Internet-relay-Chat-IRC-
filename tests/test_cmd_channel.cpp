@@ -34,6 +34,8 @@ static void	feed(Server &server, Client &client, const std::string &line)
 		cmdJoin(server, client, msg);
 	else if (msg.command == "PART")
 		cmdPart(server, client, msg);
+	else if (msg.command == "PRIVMSG")
+		cmdPrivmsg(server, client, msg);
 }
 
 static bool	contains(const std::string &haystack, const std::string &needle)
@@ -856,6 +858,125 @@ static void	testPartSeveralChannels(void)
 		"and the valid one was still left — which emptied it");
 }
 
+// --- step 4: talking ------------------------------------------------------
+
+static void	testPrivmsgErrors(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+
+	feed(server, alice, "PRIVMSG");
+	checkEqual(alice.getOutputBuffer(),
+		":ircserv 411 alice :No recipient given (PRIVMSG)\r\n",
+		"PRIVMSG with no target is 411, and names the command");
+
+	Client	bob(-1, "localhost");
+
+	makeUser(bob, "bob");
+	feed(server, bob, "PRIVMSG #room");
+	checkEqual(bob.getOutputBuffer(),
+		":ircserv 412 bob :No text to send\r\n",
+		"a target with no text is 412");
+
+	// ":" ON ITS OWN IS A PRESENT BUT EMPTY TRAILING PARAMETER, which is why
+	// the parser keeps hasTrailing. It is still nothing to say, so it is still
+	// 412 — the alternative is relaying an empty line to the whole channel.
+	Client	carol(-1, "localhost");
+
+	makeUser(carol, "carol");
+
+	Message	emptyText = parseMessage("PRIVMSG #room :");
+
+	check(emptyText.params.size() == 2 && emptyText.hasTrailing,
+		"the parser does keep an empty trailing parameter");
+	cmdPrivmsg(server, carol, emptyText);
+	check(contains(carol.getOutputBuffer(), " 412 carol :No text to send"),
+		"and an empty text is still 412");
+
+	Client	dave(-1, "localhost");
+
+	makeUser(dave, "dave");
+	feed(server, dave, "PRIVMSG #nope :oi");
+	checkEqual(dave.getOutputBuffer(),
+		":ircserv 403 dave #nope :No such channel\r\n",
+		"a channel that does not exist is 403");
+}
+
+// D13: SPEAKING IN A CHANNEL YOU ARE NOT IN IS REFUSED. We implement no +n,
+// but letting a stranger talk into a room they never entered is worse than
+// refusing, and 404 is already in the table.
+static void	testPrivmsgToChannel(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+	Client	carol(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	makeUser(carol, "carol");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+	feed(server, carol, "JOIN #room");
+
+	Client	outsider(-1, "localhost");
+
+	makeUser(outsider, "outsider");
+	feed(server, outsider, "PRIVMSG #room :deixem eu falar");
+	check(contains(outsider.getOutputBuffer(),
+			" 404 outsider #room :Cannot send to channel"),
+		"a non-member talking to the channel is 404 (D13)");
+	check(!contains(alice.getOutputBuffer(), "deixem eu falar"),
+		"and the message reaches nobody");
+
+	const std::string	beforeAlice = alice.getOutputBuffer();
+
+	feed(server, alice, "PRIVMSG #room :ola pessoal");
+
+	// THE SENDER DOES NOT GET THEIR OWN MESSAGE BACK. That asymmetry with JOIN
+	// is the protocol's, not ours: the client already displayed what the user
+	// typed, and echoing it would double every line on screen.
+	checkEqual(alice.getOutputBuffer(), beforeAlice,
+		"the sender receives nothing back");
+	check(contains(bob.getOutputBuffer(),
+			":alice!alice@localhost PRIVMSG #room :ola pessoal\r\n"),
+		"every other member receives it, with the sender's prefix");
+	check(contains(carol.getOutputBuffer(),
+			":alice!alice@localhost PRIVMSG #room :ola pessoal\r\n"),
+		"including the third one");
+
+	// The text is a trailing parameter, so spaces and further colons inside it
+	// are content. This is the parser's rule showing up where it matters.
+	feed(server, alice, "PRIVMSG #room :12:30 e hora do almoco, ok?");
+	check(contains(bob.getOutputBuffer(),
+			":12:30 e hora do almoco, ok?\r\n"),
+		"colons and spaces inside the text survive intact");
+
+	// The channel is found case-insensitively, and the relayed line carries
+	// the channel's original spelling (D5).
+	feed(server, alice, "PRIVMSG #ROOM :de novo");
+	check(contains(bob.getOutputBuffer(), " PRIVMSG #room :de novo"),
+		"the target is matched ignoring case and relayed in its own spelling");
+}
+
+// The nick path. In a unit test findClientByNick always returns NULL, because
+// clients only enter Server::_clients through accept() — so what is provable
+// here is the ERROR, and the delivery is proved over a socket in
+// tests/it/privmsg.sh. See section 1.1 of docs/FASE3.md.
+static void	testPrivmsgToUnknownUser(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+	feed(server, alice, "PRIVMSG ninguem :ola");
+	checkEqual(alice.getOutputBuffer(),
+		":ircserv 401 alice ninguem :No such nick/channel\r\n",
+		"a message to a nickname nobody holds is 401");
+}
+
 void	runCommandChannelTests(void)
 {
 	testModeErrors();
@@ -879,4 +1000,7 @@ void	runCommandChannelTests(void)
 	testChannelDisappearsWhenEmpty();
 	testChannelSurvivesLosingItsOperator();
 	testPartSeveralChannels();
+	testPrivmsgErrors();
+	testPrivmsgToChannel();
+	testPrivmsgToUnknownUser();
 }

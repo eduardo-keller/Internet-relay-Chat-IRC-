@@ -169,6 +169,7 @@ by hand, with the server stopped — each script starts its own:
 ./tests/it/channel_seam.sh   # the disconnect sweep, under valgrind
 ./tests/it/join.sh           # the JOIN sequence, and two clients in one channel
 ./tests/it/part.sh           # leaving, and the channel lifecycle around it
+./tests/it/privmsg.sh        # channel and private messages, and the 510 cut
 
 for t in tests/it/*.sh; do "$t" || echo "FAILED: $t"; done
 ```

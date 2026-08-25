@@ -117,8 +117,8 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | `cmdJoin` — múltiplos canais (`#a,#b key1,key2`) | ~~DOMAIN~~ Eduardo | done (passo 2; chaves posicionais, campo vazio preservado) |
 | `cmdJoin` — checagem de `+i`, `+k`, `+l` (`473`/`475`/`471`) | ~~DOMAIN~~ Eduardo | done (passo 2; ordem i→k→l, D19). Falta o caso ponta a ponta, que depende do `MODE` dos passos 9–12 |
 | `cmdPart` (+ `442`, canal vazio é removido) | ~~DOMAIN~~ Eduardo | done (passo 3; `tests/it/part.sh`, D20) |
-| `cmdPrivmsg` — para canal | DOMAIN | todo |
-| `cmdPrivmsg` — para usuário (+ `401`, `411`, `412`) | DOMAIN | todo |
+| `cmdPrivmsg` — para canal | ~~DOMAIN~~ Eduardo | done (passo 4; `tests/it/privmsg.sh`) |
+| `cmdPrivmsg` — para usuário (+ `401`, `411`, `412`) | ~~DOMAIN~~ Eduardo | done (passo 4, junto com o de canal) |
 | `cmdTopic` — ver e alterar (+ `331`, `332`, `+t` → `482`) | DOMAIN | todo |
 | `cmdKick` (+ `441`, `442`, `482`) | DOMAIN | todo |
 | `cmdInvite` (+ `341`, `401`, `443`, `482`) | DOMAIN | todo |
@@ -140,7 +140,7 @@ primeiro — marque seu nome ao começar) · `BOTH` (sessão conjunta).
 | Pacote parcial via `nc -C` (teste do subject) | BOTH | done roteirizado (`tests/it/read_path.sh`); falta o `Ctrl+D` na mão |
 | Vários comandos num pacote só | BOTH | done (`read_path.sh`, `registration.sh`) |
 | Regressão: linha > 512 truncada (implementado na Fase 1) | BOTH | done (`write_path.sh`, `hardening.sh`) |
-| `PRIVMSG` de 504 bytes + prefixo sai truncado em 510 | BOTH | mecanismo pronto e testado (`sendToClient`); falta o caso com `PRIVMSG` de verdade |
+| `PRIVMSG` de 504 bytes + prefixo sai truncado em 510 | BOTH | **done** (Fase 3 passo 4: `tests/it/privmsg.sh` manda 480 bytes de texto e afere 510 na chegada) |
 | `QUIT` colado com outra linha no mesmo pacote | BOTH | done no passo 7 (`tests/it/session.sh`); repetir com canais quando o `JOIN` existir |
 | Cliente que para de ler (`Ctrl+Z` no `nc`) estoura SendQ | BOTH | done no passo 4 (cliente que não lê → `SendQ exceeded`); refazer com `Ctrl+Z` de verdade na Fase 4 |
 | Bytes NUL e lixo binário não derrubam | BOTH | done (`hardening.sh`: `/dev/urandom` e NUL no meio do comando) |

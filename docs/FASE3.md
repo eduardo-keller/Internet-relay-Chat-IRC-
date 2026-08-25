@@ -105,7 +105,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | D15 | `WHO` / `WHOIS` / outros que o irssi mandar sozinho | **CORRIGIDA no Passo 1 — a primeira versão estava errada.** O irssi 1.4.5 manda sozinho: `CAP LS 302`, **`JOIN :`** (lista vazia, antes até do `CAP END`), `CAP END`, `PASS`, `NICK`, `USER`, `MODE <nick> +i`, `MODE <canal>` após cada `JOIN`, `PING` no timer — **e também `WHO <canal>` e `WHOIS <nick>`**. A captura do Passo 0 tinha **um cliente só e um canal vazio**, e nessas condições o `WHO`/`WHOIS` não aparece; com dois clientes num canal, aparece, e vira `421 :Unknown command` na janela de status dos dois. Uma amostra de um cliente não descreve o comportamento de dois — a lição a levar para o Passo 13. Tratamento pendente: **Passo 1.5** | corrigida 2026-08-24 |
 | D20 | Canal que perde o último operador | **Fica sem operador nenhum.** Promover automaticamente o próximo escolheria alguém de dentro de um `std::set` ordenado por endereço de memória — ao acaso, e diferente entre execuções. Os servidores reais deixam sem operador, e quem quiser reabrir o canal pode esvaziá-lo e entrar de novo | aceita 2026-08-24 |
 | D19 | Ordem dos portões do `JOIN`, e o alcance do convite | **`+i` → `+k` → `+l`**: um canal pode ter os três, só um numeric volta, e o que volta deve ser a razão mais específica. `+i` é uma afirmação sobre *quem* entra, então vem antes de uma chave que o cliente poderia ter mandado e de um limite que muda sozinho — é também a ordem dos servidores implantados. **O convite abre o `+i` e mais nada:** quem foi convidado ainda apresenta a chave e ainda espera vaga, senão qualquer operador poderia dar entrada num canal com chave sem saber a chave. O convite é gasto **só na entrada bem-sucedida**; gastá-lo numa tentativa recusada deixaria uma chave errada queimar o convite de alguém | aceita 2026-08-24 |
-| D18 | `JOIN` com lista de canais **vazia** (`JOIN :`) | **Silêncio**, sem numeric. O irssi manda essa linha sozinho em toda conexão — confirmado com perfil recém-criado, e visível também na captura contra o servidor-mock, então não é resíduo de configuração. `403` ou `461` ali poriam uma linha de erro na janela de status de todo mundo que conecta, que é o que o subject proíbe. **`JOIN` sem parâmetro nenhum continua `461`**: essa forma nenhum cliente manda, e é erro de quem digita no `nc`. A assimetria é medida, não inventada | aceita 2026-08-24 |
+| D18 | `JOIN` com lista de canais **vazia** (`JOIN :`) | **Silêncio**, sem numeric. **`JOIN` sem parâmetro nenhum continua `461`**: essa forma nenhum cliente manda, e é erro de quem digita no `nc`. Vale também para campo vazio no meio de uma lista (`#a,,#b`). **Correção de 2026-08-24 (passo 4):** a justificativa original dizia que sem isso o irssi ganharia uma linha de erro na janela de status a cada conexão. Medido, não é o que acontece: o `JOIN :` espontâneo chega **antes do registro**, então quem responde é a porta do despachante, com `451`, e o handler nunca é alcançado — e o irssi **ignora** esse `451` (a janela de status fica limpa, verificado). O ramo silencioso continua necessário para o cliente **já registrado** e para o campo vazio no meio da lista; o que estava errado era o mecanismo que eu atribuí a ele | aceita 2026-08-24, justificativa corrigida |
 | D16 | Tamanho de tópico | Sem constante nova em `Limits.hpp`. O único teto é a truncagem em 510 do `sendToClient`, que já cobre o caso do prefixo empurrar a linha para fora do limite | aceita 2026-08-24 |
 | D17 | **`CAP` tem de responder — revoga a D2** | O irssi 1.4.5 **bloqueia o registro** esperando resposta ao `CAP LS`: com o handler silencioso da D2 ele nunca manda `PASS`/`NICK`/`USER` e o cliente de referência jamais conecta. `cmdCap` passa a responder `:ircserv CAP * LS :` (lista de capacidades **vazia**), ao que o irssi responde `CAP END` e segue o registro normalmente. `CAP REQ` → `NAK`; `CAP END` e qualquer outro subcomando → silêncio. A **motivação** da D2 continua de pé (nada de `421`, que polui a janela de status); o que estava errado era achar que silêncio bastava | aceita 2026-08-24, medida |
 
@@ -122,8 +122,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | 1.5 | `WHO` / `WHOIS` — o `421` que só aparece com dois clientes | **duas janelas de status limpas; zero `421` no fio** | **done** 2026-08-24 |
 | 2 | `cmdJoin` — múltiplos canais e portões `+i`/`+k`/`+l` | `/join #a,#b` abre **duas** janelas; `473`/`475`/`471` | **done** 2026-08-24 |
 | 3 | `cmdPart` | dois irssi, um sai, o outro vê; canal vazio some | **done** 2026-08-24 |
-| 4 | `cmdPrivmsg` para canal | conversa entre dois irssi | todo |
-| 5 | `cmdPrivmsg` para usuário | `/msg bob oi` abre janela no bob | todo |
+| 4 | `cmdPrivmsg` — canal **e** usuário (passos 4 e 5 juntos) | conversa entre dois irssi + `/msg` privado | **done** 2026-08-24 |
 | 6 | `cmdTopic` | `/topic` mostra e altera; `+t` bloqueia | todo |
 | 7 | `cmdKick` | `/kick` tira o alvo da janela dele | todo |
 | 8 | `cmdInvite` | `/invite` entra em canal `+i`; **confirma D8** | todo |
@@ -681,7 +680,29 @@ oito scripts usam sempre dentro de `$( )` e não têm o problema (conferido).
 
 ---
 
-## 9. Passo 4 — `cmdPrivmsg` para canal
+## 9. Passo 4 — `cmdPrivmsg`: canal e usuário
+
+> **Os passos 4 e 5 do plano foram feitos como um só.** Separá-los custaria um
+> passo inteiro respondendo errado a uma mensagem privada — ou um `401` que
+> mente dizendo que o usuário não existe, ou um silêncio que a engole — e os
+> dois caminhos ficam a dez linhas de distância dentro do mesmo handler.
+> Entregar meio comando é pior do que entregar o comando.
+
+### Pronto quando — cumprido em 2026-08-24
+
+`make test` em **516 asserções**, `tests/it/privmsg.sh` com 14 casos, e no
+irssi: dois clientes conversando na mesma janela de canal
+(`<@edu_k> ola` / `< edu_k_> tudo otimo`) e um `/msg` abrindo a janela de
+query do outro lado. No fio, cada mensagem de canal sai **uma vez só**, para o
+outro membro — o remetente não recebe cópia.
+
+**Fecha também um item da Fase 4:** o `PRIVMSG` de texto longo. 480 bytes de
+texto entram numa linha legal (505 < 512), o prefixo `:nick!user@host` empurra
+a saída para 518, e ela chega ao destinatário cortada em **exatamente 510**.
+Era o último item da lista de endurecimento que estava com o mecanismo pronto
+e sem um caso de verdade.
+
+### O que era o plano original deste passo
 
 ### Implementar
 
