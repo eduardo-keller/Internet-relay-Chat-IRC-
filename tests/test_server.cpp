@@ -271,15 +271,14 @@ static void	testCommandTable(void)
 		"table: PRIVMSG is registered");
 	check(table.find("TOPIC") != table.end(), "table: TOPIC is registered");
 	check(table.find("KICK") != table.end(), "table: KICK is registered");
-	check(table.find("INVITE") == table.end(),
-		"table: INVITE is not wired up yet");
+	check(table.find("INVITE") != table.end(), "table: INVITE is registered");
 	// WHO and WHOIS are registered for the same reason CAP is: irssi sends
 	// them by itself, and 421 in its status window is an error the subject
 	// forbids. See step 1.5 of docs/FASE3.md.
 	check(table.find("WHO") != table.end(), "table: WHO is registered");
 	check(table.find("WHOIS") != table.end(), "table: WHOIS is registered");
-	check(table.size() == 15,
-		"table: seven transport, plus the channel commands so far");
+	check(table.size() == 16,
+		"table: seven transport, plus all seven channel commands, WHO, WHOIS");
 }
 
 void	runServerTests(void)

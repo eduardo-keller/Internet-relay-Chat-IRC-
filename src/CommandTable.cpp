@@ -39,7 +39,7 @@ CommandTable	buildCommandTable()
 	table["PART"] = &cmdPart;
 	table["PRIVMSG"] = &cmdPrivmsg;
 	table["KICK"] = &cmdKick;
-	// table["INVITE"] = &cmdInvite;
+	table["INVITE"] = &cmdInvite;
 	table["TOPIC"] = &cmdTopic;
 
 	// MODE is registered ahead of the other six, out of the order the TASKS.md

@@ -172,6 +172,7 @@ by hand, with the server stopped — each script starts its own:
 ./tests/it/privmsg.sh        # channel and private messages, and the 510 cut
 ./tests/it/topic.sh          # reading, setting and clearing the topic
 ./tests/it/kick.sh           # the first operator command, over two live clients
+./tests/it/invite.sh         # invitations, and the RFC 1459 order of 341
 
 for t in tests/it/*.sh; do "$t" || echo "FAILED: $t"; done
 ```

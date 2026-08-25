@@ -103,6 +103,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | D13 | `PRIVMSG` para canal de quem não é membro | `404 ERR_CANNOTSENDTOCHAN`. Não implementamos `+n`, mas deixar um estranho falar num canal em que não está é pior do que recusar, e o `404` já está na tabela | aceita 2026-08-24 |
 | D14 | `JOIN 0` (sair de todos os canais) | **Não implementado.** `0` reprova em `isValidChannelName` e ganha `403 ERR_NOSUCHCHANNEL`. Está fora da lista do subject, e o irssi manda `PART` explícito | aceita 2026-08-24 |
 | D15 | `WHO` / `WHOIS` / outros que o irssi mandar sozinho | **CORRIGIDA no Passo 1 — a primeira versão estava errada.** O irssi 1.4.5 manda sozinho: `CAP LS 302`, **`JOIN :`** (lista vazia, antes até do `CAP END`), `CAP END`, `PASS`, `NICK`, `USER`, `MODE <nick> +i`, `MODE <canal>` após cada `JOIN`, `PING` no timer — **e também `WHO <canal>` e `WHOIS <nick>`**. A captura do Passo 0 tinha **um cliente só e um canal vazio**, e nessas condições o `WHO`/`WHOIS` não aparece; com dois clientes num canal, aparece, e vira `421 :Unknown command` na janela de status dos dois. Uma amostra de um cliente não descreve o comportamento de dois — a lição a levar para o Passo 13. Tratamento pendente: **Passo 1.5** | corrigida 2026-08-24 |
+| D21 | Canal inexistente no `INVITE` | **`442`, não `403`.** O RFC 2812 §3.2.7 lista exatamente `461`, `401`, `442`, `443` e `482` para o `INVITE`, e **não** lista `ERR_NOSUCHCHANNEL`. "Você não está nesse canal" é verdade sobre um canal que não existe, então os dois casos viram uma resposta só, em vez de um deles ganhar um código que o RFC deliberadamente deixou de fora deste comando | aceita 2026-08-24 |
 | D20 | Canal que perde o último operador | **Fica sem operador nenhum.** Promover automaticamente o próximo escolheria alguém de dentro de um `std::set` ordenado por endereço de memória — ao acaso, e diferente entre execuções. Os servidores reais deixam sem operador, e quem quiser reabrir o canal pode esvaziá-lo e entrar de novo | aceita 2026-08-24 |
 | D19 | Ordem dos portões do `JOIN`, e o alcance do convite | **`+i` → `+k` → `+l`**: um canal pode ter os três, só um numeric volta, e o que volta deve ser a razão mais específica. `+i` é uma afirmação sobre *quem* entra, então vem antes de uma chave que o cliente poderia ter mandado e de um limite que muda sozinho — é também a ordem dos servidores implantados. **O convite abre o `+i` e mais nada:** quem foi convidado ainda apresenta a chave e ainda espera vaga, senão qualquer operador poderia dar entrada num canal com chave sem saber a chave. O convite é gasto **só na entrada bem-sucedida**; gastá-lo numa tentativa recusada deixaria uma chave errada queimar o convite de alguém | aceita 2026-08-24 |
 | D18 | `JOIN` com lista de canais **vazia** (`JOIN :`) | **Silêncio**, sem numeric. **`JOIN` sem parâmetro nenhum continua `461`**: essa forma nenhum cliente manda, e é erro de quem digita no `nc`. Vale também para campo vazio no meio de uma lista (`#a,,#b`). **Correção de 2026-08-24 (passo 4):** a justificativa original dizia que sem isso o irssi ganharia uma linha de erro na janela de status a cada conexão. Medido, não é o que acontece: o `JOIN :` espontâneo chega **antes do registro**, então quem responde é a porta do despachante, com `451`, e o handler nunca é alcançado — e o irssi **ignora** esse `451` (a janela de status fica limpa, verificado). O ramo silencioso continua necessário para o cliente **já registrado** e para o campo vazio no meio da lista; o que estava errado era o mecanismo que eu atribuí a ele | aceita 2026-08-24, justificativa corrigida |
@@ -125,7 +126,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | 4 | `cmdPrivmsg` — canal **e** usuário (passos 4 e 5 juntos) | conversa entre dois irssi + `/msg` privado | **done** 2026-08-24 |
 | 6 | `cmdTopic` | `/topic` mostra e altera; `+t` bloqueia | **done** 2026-08-24 |
 | 7 | `cmdKick` | `/kick` tira o alvo da janela dele | **done** 2026-08-24 |
-| 8 | `cmdInvite` | `/invite` entra em canal `+i`; **confirma D8** | todo |
+| 8 | `cmdInvite` | `/invite` entrega o convite; **D8 confirmada no irssi** | **done** 2026-08-24 |
 | 9 | `cmdMode` — parser, consulta `324`, `472` | `/mode #c` mostra os modos | todo |
 | 10 | `cmdMode` — `i` e `t` | `+i` fecha o canal, `+t` tranca o tópico | todo |
 | 11 | `cmdMode` — `k` e `l` | chave e limite ligam e desligam | todo |
@@ -890,10 +891,26 @@ Unidade cobre `461` e `401`. O resto — que precisa de um alvo achável — vai
 para `tests/it/invite.sh`: convida, o convidado entra num canal `+i`, e uma
 segunda tentativa de entrar (convite consumido no Passo 2) dá `473`.
 
-### Confirmar D8 aqui
+### D8 confirmada — 2026-08-24
 
-Este é o passo que olha o `341` no irssi. Se ele mostrar o convite de forma
-estranha, inverte a ordem e **anota no `ARCHITECTURE.md` §6** — não improvisa.
+O fio e as duas telas:
+
+```
+C->S  INVITE edu_k_ #festa
+S->C  :ircserv 341 edu_k edu_k_ #festa
+S->C  :edu_k!edu_k@127.0.0.1 INVITE edu_k_ :#festa
+```
+
+O irssi de quem convidou mostrou `Inviting edu_k_ to #festa`, e o do convidado
+`edu_k invites you to #festa`. Ele leu o `341` na ordem **RFC 1459
+`<nick> <channel>`** sem reclamar: a D8 fica como está, e a tabela do
+`ARCHITECTURE.md` §6 já traz essa forma.
+
+### Pronto quando — cumprido em 2026-08-24
+
+`make test` em **557 asserções** e `tests/it/invite.sh` com 11 casos. O caso
+`+i` — convidado entra, não convidado leva `473` — precisa do `MODE` para ligar
+o modo e entra no Passo 10.
 
 ---
 

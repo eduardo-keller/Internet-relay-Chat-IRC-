@@ -40,6 +40,8 @@ static void	feed(Server &server, Client &client, const std::string &line)
 		cmdTopic(server, client, msg);
 	else if (msg.command == "KICK")
 		cmdKick(server, client, msg);
+	else if (msg.command == "INVITE")
+		cmdInvite(server, client, msg);
 }
 
 static bool	contains(const std::string &haystack, const std::string &needle)
@@ -1256,6 +1258,81 @@ static void	testKickDetails(void)
 		"an operator can kick themselves, and the emptied channel is removed");
 }
 
+// --- step 8: INVITE -------------------------------------------------------
+
+static void	testInviteErrors(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+
+	makeUser(alice, "alice");
+	feed(server, alice, "JOIN #room");
+
+	feed(server, alice, "INVITE bob");
+	check(contains(alice.getOutputBuffer(),
+			" 461 alice INVITE :Not enough parameters"),
+		"INVITE with only a nickname is 461");
+
+	// 442, NOT 403, FOR A CHANNEL THAT DOES NOT EXIST — decision D21. RFC 2812
+	// section 3.2.7 lists 461, 401, 442, 443 and 482 for INVITE and does NOT
+	// list ERR_NOSUCHCHANNEL. "You're not on that channel" is true of a channel
+	// that is not there, and inventing a code the RFC left out of this command
+	// is exactly what ARCHITECTURE.md section 10 warns against.
+	feed(server, alice, "INVITE bob #nope");
+	check(contains(alice.getOutputBuffer(),
+			" 442 alice #nope :You're not on that channel"),
+		"inviting to a channel that does not exist is 442 (D21)");
+
+	Client	outsider(-1, "localhost");
+
+	makeUser(outsider, "outsider");
+	feed(server, outsider, "INVITE bob #room");
+	check(contains(outsider.getOutputBuffer(),
+			" 442 outsider #room :You're not on that channel"),
+		"and so is inviting to a channel you are not in");
+
+	// In a unit test findClientByNick always returns NULL, so this is the one
+	// INVITE path provable here; the delivery is proved over a socket in
+	// tests/it/invite.sh. See section 1.1 of docs/FASE3.md.
+	feed(server, alice, "INVITE ninguem #room");
+	check(contains(alice.getOutputBuffer(),
+			" 401 alice ninguem :No such nick/channel"),
+		"inviting somebody who is not connected is 401");
+}
+
+// WITHOUT +i ANY MEMBER MAY INVITE; with it, only operators. That is the whole
+// point of the mode: it turns the guest list into an operator's decision.
+static void	testInvitePrivileges(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+
+	Channel	*channel = server.findChannel("#room");
+
+	// bob is a plain member. With the channel open, his 401 proves he got past
+	// the privilege check — the failure is the missing target, not his rank.
+	feed(server, bob, "INVITE ninguem #room");
+	check(contains(bob.getOutputBuffer(), " 401 bob ninguem "),
+		"a plain member may invite while the channel is open");
+
+	channel->setInviteOnly(true);
+	feed(server, bob, "INVITE ninguem #room");
+	check(contains(bob.getOutputBuffer(),
+			" 482 bob #room :You're not channel operator"),
+		"under +i, a plain member inviting is 482");
+
+	// The operator still can, and reaches the target lookup.
+	feed(server, alice, "INVITE ninguem #room");
+	check(contains(alice.getOutputBuffer(), " 401 alice ninguem "),
+		"the operator gets past the privilege check under +i");
+}
+
 void	runCommandChannelTests(void)
 {
 	testModeErrors();
@@ -1289,4 +1366,6 @@ void	runCommandChannelTests(void)
 	testKickErrors();
 	testKickRemovesTheVictim();
 	testKickDetails();
+	testInviteErrors();
+	testInvitePrivileges();
 }

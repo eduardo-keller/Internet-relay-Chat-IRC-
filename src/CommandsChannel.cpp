@@ -641,6 +641,94 @@ void	cmdKick(Server &server, Client &sender, const Message &msg)
 		server.removeChannel(msg.params[0]);
 }
 
+// INVITE <nick> <channel>
+//
+// NOTE THE PARAMETER ORDER: nickname first, channel second. It is the reverse
+// of KICK's, and it is what the RFC specifies — a place where reading the
+// grammar beats guessing from the neighbouring command.
+//
+// The invitation is stored on the Channel as a Client POINTER, not a nickname
+// (ARCHITECTURE.md section 3). A nickname would lose the invite the moment the
+// invitee ran /nick: invite alice, she becomes bob, her JOIN looks up bob and
+// finds nothing. Pointer identity survives a nick change for free, and the
+// disconnect sweep already clears it.
+void	cmdInvite(Server &server, Client &sender, const Message &msg)
+{
+	if (msg.params.size() < 2)
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NEEDMOREPARAMS, sender.getNickname(),
+				"INVITE :Not enough parameters"));
+		return ;
+	}
+
+	const std::string	&targetNick = msg.params[0];
+	const std::string	&channelName = msg.params[1];
+	Channel				*channel = server.findChannel(channelName);
+
+	// 442 FOR A CHANNEL THAT DOES NOT EXIST, NOT 403 — decision D21.
+	//
+	// RFC 2812 section 3.2.7 lists exactly 461, 401, 442, 443 and 482 for
+	// INVITE, and ERR_NOSUCHCHANNEL is not among them. "You're not on that
+	// channel" is true of a channel that is not there, so the two cases fold
+	// into one answer rather than one of them earning a code the RFC
+	// deliberately left out of this command.
+	if (channel == NULL || !channel->isMember(&sender))
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOTONCHANNEL, sender.getNickname(),
+				channelName + " :You're not on that channel"));
+		return ;
+	}
+
+	// +i IS THE ONLY MODE THAT RESTRICTS INVITING, and that is the whole point
+	// of it: an open channel needs no gatekeeper, so any member may bring a
+	// friend. Turning the channel invite-only turns the guest list into an
+	// operator's decision.
+	if (channel->isInviteOnly() && !channel->isOperator(&sender))
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_CHANOPRIVSNEEDED, sender.getNickname(),
+				channel->getName() + " :You're not channel operator"));
+		return ;
+	}
+
+	// The second of the two places findClientByNick belongs (D10): the point
+	// of an invitation is that the target is NOT in the channel, so scanning
+	// the member set would find nobody by definition.
+	Client	*target = server.findClientByNick(targetNick);
+
+	if (target == NULL)
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOSUCHNICK, sender.getNickname(),
+				targetNick + " :No such nick/channel"));
+		return ;
+	}
+	if (channel->isMember(target))
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_USERONCHANNEL, sender.getNickname(),
+				target->getNickname() + " " + channel->getName()
+				+ " :is already on channel"));
+		return ;
+	}
+
+	channel->addInvite(target);
+
+	// 341 IS "<nick> <channel>" — decision D8, the RFC 1459 order, which is
+	// what deployed servers send. RFC 2812 has the two the other way round.
+	server.sendToClient(sender, irc::numeric(server.getServerName(),
+			irc::RPL_INVITING, sender.getNickname(),
+			target->getNickname() + " " + channel->getName()));
+
+	// And the invitation itself, to the person invited. The channel travels as
+	// a trailing parameter, which is what irssi expects.
+	server.sendToClient(*target,
+		irc::fromClient(sender.prefix(), "INVITE",
+			target->getNickname() + " :" + channel->getName()));
+}
+
 // MODE, in the smallest form that keeps irssi's status window clean.
 //
 // Step 0.6 of docs/FASE3.md. It answers the QUERY and changes nothing; the
