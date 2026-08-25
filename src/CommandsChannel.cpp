@@ -523,6 +523,124 @@ void	cmdTopic(Server &server, Client &sender, const Message &msg)
 			channel->getName() + " :" + msg.params[1]), NULL);
 }
 
+// Finds a member of THIS CHANNEL by nickname. NULL when there is none.
+//
+// DECISION D10, and the reason it exists rather than a call to
+// Server::findClientByNick. Two arguments, in order of weight:
+//
+//   * IT IS THE RIGHT QUESTION. KICK and MODE +o both ask "is this person in
+//     this channel", not "does this person exist anywhere". RFC 2812 lists
+//     ERR_USERNOTINCHANNEL for KICK and does NOT list ERR_NOSUCHNICK, which is
+//     the RFC saying the same thing.
+//   * IT IS TESTABLE. findClientByNick reads Server::_clients, and a client
+//     only enters that map through accept(), so in a unit test it always
+//     returns NULL — the happy path of anything built on it can only be shown
+//     over a socket. Scanning the member set has no such dependency.
+//
+// The comparison is utils::equalsIgnoreCase, so Nick[42] and nick{42} are the
+// same person (RFC 2812 section 2.2).
+static Client	*findMemberByNick(Channel &channel, const std::string &nickname)
+{
+	const std::set<Client *>	&members = channel.getMembers();
+
+	for (std::set<Client *>::const_iterator it = members.begin();
+		it != members.end(); ++it)
+	{
+		if (*it != NULL && utils::equalsIgnoreCase((*it)->getNickname(),
+				nickname))
+			return (*it);
+	}
+	return (NULL);
+}
+
+// KICK <channel> <nick> [ :<reason> ]
+//
+// The first of the three operator commands. The checks run from the widest to
+// the narrowest — does the channel exist, are you in it, are you an operator
+// of it, is your target in it — so that the client is told the first thing that
+// is actually wrong rather than the last.
+void	cmdKick(Server &server, Client &sender, const Message &msg)
+{
+	if (msg.params.size() < 2)
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NEEDMOREPARAMS, sender.getNickname(),
+				"KICK :Not enough parameters"));
+		return ;
+	}
+
+	Channel	*channel = server.findChannel(msg.params[0]);
+
+	if (channel == NULL)
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOSUCHCHANNEL, sender.getNickname(),
+				msg.params[0] + " :No such channel"));
+		return ;
+	}
+	if (!channel->isMember(&sender))
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOTONCHANNEL, sender.getNickname(),
+				channel->getName() + " :You're not on that channel"));
+		return ;
+	}
+
+	// THE LINE THAT MAKES A CHANNEL OPERATOR MEAN ANYTHING.
+	if (!channel->isOperator(&sender))
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_CHANOPRIVSNEEDED, sender.getNickname(),
+				channel->getName() + " :You're not channel operator"));
+		return ;
+	}
+
+	Client	*victim = findMemberByNick(*channel, msg.params[1]);
+
+	if (victim == NULL)
+	{
+		// The nickname is echoed AS TYPED, because there is no member whose
+		// own spelling could be used instead.
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_USERNOTINCHANNEL, sender.getNickname(),
+				msg.params[1] + " " + channel->getName()
+				+ " :They aren't on that channel"));
+		return ;
+	}
+
+	// NO REASON MEANS THE KICKER'S NICKNAME. Every deployed server does this,
+	// and it is what makes the client's line read "bob was kicked by alice
+	// (alice)" rather than trail off into nothing.
+	const std::string	reason = (msg.params.size() > 2) ? msg.params[2]
+							: sender.getNickname();
+
+	// AN OPERATOR MAY KICK AN OPERATOR, and may kick themselves. Nothing in
+	// the protocol ranks two operators, and refusing would need a rule we do
+	// not have.
+	//
+	// The victim's OWN spelling of their nickname goes on the wire, not what
+	// the kicker typed: their client matches this line against its own nick to
+	// decide whether to close the window.
+	//
+	// BROADCAST BEFORE REMOVING, the victim included — same reason as PART.
+	server.broadcastToChannel(*channel,
+		irc::fromClient(sender.prefix(), "KICK",
+			channel->getName() + " " + victim->getNickname() + " :" + reason),
+		NULL);
+
+	channel->removeMember(victim);
+	channel->removeOperator(victim);
+
+	// KICK ENDS A MEMBERSHIP, NOT A CONNECTION: the victim is still a
+	// perfectly good client and may walk straight back in, unless +i or +k
+	// says otherwise.
+	//
+	// After removeChannel the pointer is dead, so the name string is what gets
+	// passed — see the same note in partOneChannel.
+	if (channel->isEmpty())
+		server.removeChannel(msg.params[0]);
+}
+
 // MODE, in the smallest form that keeps irssi's status window clean.
 //
 // Step 0.6 of docs/FASE3.md. It answers the QUERY and changes nothing; the

@@ -38,7 +38,7 @@ CommandTable	buildCommandTable()
 	table["JOIN"] = &cmdJoin;
 	table["PART"] = &cmdPart;
 	table["PRIVMSG"] = &cmdPrivmsg;
-	// table["KICK"] = &cmdKick;
+	table["KICK"] = &cmdKick;
 	// table["INVITE"] = &cmdInvite;
 	table["TOPIC"] = &cmdTopic;
 

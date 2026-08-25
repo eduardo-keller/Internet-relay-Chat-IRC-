@@ -38,6 +38,8 @@ static void	feed(Server &server, Client &client, const std::string &line)
 		cmdPrivmsg(server, client, msg);
 	else if (msg.command == "TOPIC")
 		cmdTopic(server, client, msg);
+	else if (msg.command == "KICK")
+		cmdKick(server, client, msg);
 }
 
 static bool	contains(const std::string &haystack, const std::string &needle)
@@ -1126,6 +1128,134 @@ static void	testTopicClear(void)
 		"after clearing, the query answers 331 again");
 }
 
+// --- step 7: KICK ---------------------------------------------------------
+
+static void	testKickErrors(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+
+	feed(server, alice, "KICK #room");
+	check(contains(alice.getOutputBuffer(),
+			" 461 alice KICK :Not enough parameters"),
+		"KICK with only a channel is 461");
+
+	Client	stranger(-1, "localhost");
+
+	makeUser(stranger, "stranger");
+	feed(server, stranger, "KICK #nope bob");
+	check(contains(stranger.getOutputBuffer(), " 403 stranger #nope "),
+		"KICK on a channel that does not exist is 403");
+
+	feed(server, stranger, "KICK #room bob");
+	check(contains(stranger.getOutputBuffer(),
+			" 442 stranger #room :You're not on that channel"),
+		"a non-member cannot kick, and hears 442 before anything else");
+	check(server.findChannel("#room")->isMember(&bob),
+		"and bob is still there");
+
+	// A MEMBER IS NOT AN OPERATOR. This is the line that makes the channel
+	// operator mean something.
+	feed(server, bob, "KICK #room alice");
+	check(contains(bob.getOutputBuffer(),
+			" 482 bob #room :You're not channel operator"),
+		"a plain member kicking is 482");
+	check(server.findChannel("#room")->isMember(&alice),
+		"and the operator is still there");
+
+	// 441, NOT 401 — decision D10. RFC 2812 lists ERR_USERNOTINCHANNEL for
+	// KICK and does not list ERR_NOSUCHNICK, because the question KICK asks is
+	// "is this person in THIS channel", not "does this person exist".
+	feed(server, alice, "KICK #room ninguem");
+	check(contains(alice.getOutputBuffer(),
+			" 441 alice ninguem #room :They aren't on that channel"),
+		"kicking somebody who is not in the channel is 441");
+}
+
+static void	testKickRemovesTheVictim(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+	Client	carol(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	makeUser(carol, "carol");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+	feed(server, carol, "JOIN #room");
+
+	feed(server, alice, "KICK #room bob :comporte-se");
+
+	// THE VICTIM IS TOLD, and told BEFORE being removed — that echo is what
+	// closes the channel window in their client. Remove first and they are
+	// left staring at a channel they are no longer in.
+	check(contains(bob.getOutputBuffer(),
+			":alice!alice@localhost KICK #room bob :comporte-se\r\n"),
+		"the victim receives the KICK");
+	check(contains(carol.getOutputBuffer(),
+			":alice!alice@localhost KICK #room bob :comporte-se\r\n"),
+		"and so does everyone else in the channel");
+	check(!server.findChannel("#room")->isMember(&bob),
+		"the victim is out");
+	check(server.findChannel("#room")->isMember(&carol),
+		"and nobody else moved");
+
+	// The Client object is untouched — KICK removes a membership, not a
+	// connection.
+	checkEqual(bob.getNickname(), "bob",
+		"the victim is still a connected client, just not a member");
+	check(!bob.isDisconnecting(), "and is certainly not disconnected");
+}
+
+static void	testKickDetails(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #room");
+	feed(server, bob, "JOIN #room");
+
+	// NO REASON MEANS THE KICKER'S NICK, which is the convention every
+	// deployed server follows: the line reads "bob was kicked by alice
+	// (alice)".
+	feed(server, alice, "KICK #room bob");
+	check(contains(bob.getOutputBuffer(),
+			":alice!alice@localhost KICK #room bob :alice\r\n"),
+		"a KICK with no reason uses the kicker's nickname as the reason");
+
+	// The victim's nick is matched ignoring case (RFC 2812 section 2.2), and
+	// the line carries the victim's OWN spelling.
+	Client	nick42(-1, "localhost");
+
+	makeUser(nick42, "Nick[42]");
+	feed(server, nick42, "JOIN #room");
+	feed(server, alice, "KICK #room nick{42} :casemapping");
+	check(contains(nick42.getOutputBuffer(), " KICK #room Nick[42] :casemapping"),
+		"the victim is found under IRC casemapping, and named as they spell it");
+
+	// AN OPERATOR MAY KICK AN OPERATOR, including themselves. Nothing in the
+	// protocol ranks two operators, and refusing would need a rule we do not
+	// have.
+	Client	dave(-1, "localhost");
+
+	makeUser(dave, "dave");
+	feed(server, dave, "JOIN #other");
+	feed(server, dave, "KICK #other dave :saindo por conta propria");
+	check(server.findChannel("#other") == NULL,
+		"an operator can kick themselves, and the emptied channel is removed");
+}
+
 void	runCommandChannelTests(void)
 {
 	testModeErrors();
@@ -1156,4 +1286,7 @@ void	runCommandChannelTests(void)
 	testTopicQuery();
 	testTopicChange();
 	testTopicClear();
+	testKickErrors();
+	testKickRemovesTheVictim();
+	testKickDetails();
 }

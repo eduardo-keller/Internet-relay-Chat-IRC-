@@ -124,7 +124,7 @@ Continuam a numeração do `FASE2.md` (D1–D7).
 | 3 | `cmdPart` | dois irssi, um sai, o outro vê; canal vazio some | **done** 2026-08-24 |
 | 4 | `cmdPrivmsg` — canal **e** usuário (passos 4 e 5 juntos) | conversa entre dois irssi + `/msg` privado | **done** 2026-08-24 |
 | 6 | `cmdTopic` | `/topic` mostra e altera; `+t` bloqueia | **done** 2026-08-24 |
-| 7 | `cmdKick` | `/kick` tira o alvo da janela dele | todo |
+| 7 | `cmdKick` | `/kick` tira o alvo da janela dele | **done** 2026-08-24 |
 | 8 | `cmdInvite` | `/invite` entra em canal `+i`; **confirma D8** | todo |
 | 9 | `cmdMode` — parser, consulta `324`, `472` | `/mode #c` mostra os modos | todo |
 | 10 | `cmdMode` — `i` e `t` | `+i` fecha o canal, `+t` tranca o tópico | todo |
@@ -844,9 +844,25 @@ operador chuta o último outro membro e sai  -> canal removido
 alvo por nick com CASE diferente -> funciona (equalsIgnoreCase)
 ```
 
-### Pronto quando
+### Pronto quando — cumprido em 2026-08-24
 
-`/kick #test bob` fecha a janela do bob e imprime a linha no canal.
+`make test` em **550 asserções**, `tests/it/kick.sh` com 14 casos, e no irssi
+`edu_k_ was kicked from #test by edu_k [chega por hoje]` nos dois clientes, com
+a barra do expulso saindo de `[2:127/#test]` para `[2:127]` — a janela deixou
+de estar ligada ao canal.
+
+**É o primeiro comando de operador provado ponta a ponta**, e isso é possível
+porque quem cria o canal já é operador: não depende do `MODE`, ao contrário dos
+portões do `JOIN` e do `+t`.
+
+### O script deste passo precisou de uma técnica nova
+
+Os scripts anteriores só precisavam de conexões que falam uma vez e desligam,
+e o helper `talk` bastava. O `KICK` precisa de **conversa**: o operador tem de
+continuar lá, ainda operador, quando a vítima já entrou. Duas conexões
+persistentes, cada uma dirigida por um **FIFO** mantido aberto pelo shell
+principal, é o que torna um cliente de vida longa roteirizável linha a linha.
+Vale para os passos 8 a 12, que têm a mesma forma.
 
 ---
 
