@@ -28,7 +28,8 @@ Client::Client() :
 	_disconnecting(false),
 	_quitReason(),
 	_readBuffer(),
-	_outputBuffer()
+	_outputBuffer(),
+	_lingerRounds(0)
 {
 }
 
@@ -45,7 +46,8 @@ Client::Client(int fd, const std::string &hostname) :
 	_disconnecting(false),
 	_quitReason(),
 	_readBuffer(),
-	_outputBuffer()
+	_outputBuffer(),
+	_lingerRounds(0)
 {
 }
 
@@ -467,6 +469,33 @@ void	Client::consumeOutput(std::size_t bytes)
 bool	Client::hasPendingOutput() const
 {
 	return (!_outputBuffer.empty());
+}
+
+// --- the linger budget ----------------------------------------------------
+//
+// Counted in REAP PASSES, not in seconds and not in bytes. The reaper is the
+// only caller, it runs exactly once per poll iteration, and it bumps this on
+// every pass a marked client survives with output still queued. Three passes
+// is enough for a peer that is reading at all, and short enough that one that
+// is not cannot squat on an fd.
+int	Client::lingerRounds() const
+{
+	return (_lingerRounds);
+}
+
+void	Client::bumpLinger()
+{
+	++_lingerRounds;
+}
+
+// Discards the queue so the next reap pass closes this client at once.
+//
+// Called when POLLERR or POLLHUP says the peer is already gone: there is
+// nobody left to read the ERROR, and lingering for it would only delay the
+// close and hold the fd.
+void	Client::dropPendingOutput()
+{
+	_outputBuffer.clear();
 }
 
 // --- deferred disconnect --------------------------------------------------

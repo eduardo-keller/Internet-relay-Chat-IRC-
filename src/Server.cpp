@@ -184,7 +184,15 @@ void	Server::run()
 		// periodic work in this server, so any finite timeout would only mean
 		// waking up to do nothing. This is what keeps an idle process — even
 		// one holding fifty connections — at 0.0% CPU.
-		int	ready = poll(&_pollFds[0], _pollFds.size(), -1);
+		//
+		// THE ONE EXCEPTION is a client lingering on its way out. Its budget
+		// is counted in reap passes, and a pass only happens when poll()
+		// returns — so a peer that has stopped reading, and therefore never
+		// raises POLLOUT, would produce no event at all and hold its fd for
+		// ever behind a -1. A finite timeout while anyone is lingering makes
+		// the budget advance on its own; the idle case is untouched.
+		int	timeout = hasLingeringClients() ? irc::LINGER_POLL_MS : -1;
+		int	ready = poll(&_pollFds[0], _pollFds.size(), timeout);
 
 		if (ready < 0)
 		{
@@ -229,7 +237,16 @@ void	Server::run()
 				// left in place, poll() would report it every iteration forever.
 				Client	*client = findClientByFd(fd);
 
-				if (client != NULL)
+				if (client == NULL)
+					continue ;
+				// ALREADY MARKED means it is lingering to flush an ERROR, and
+				// this event says the peer is gone. Nobody is left to read it,
+				// so the queue is dropped and the reap below closes the fd on
+				// this very pass instead of burning the whole budget waiting
+				// for a POLLOUT that will never come.
+				if (client->isDisconnecting())
+					client->dropPendingOutput();
+				else
 					disconnectClient(*client, "Connection closed by peer");
 			}
 		}
@@ -262,14 +279,27 @@ void	Server::buildPollFds()
 		it != _clients.end(); ++it)
 	{
 		pfd.fd = it->first;
-		pfd.events = POLLIN;
-		// POLLOUT ONLY WHEN THERE IS SOMETHING TO WRITE. A socket with room in
-		// its send buffer is always writable, so arming it unconditionally
-		// makes poll() return immediately every single iteration and the loop
-		// spins at 100% CPU with nothing to do — the most common way this
-		// design goes wrong, and the first thing an evaluator measures.
-		if (it->second->hasPendingOutput())
-			pfd.events |= POLLOUT;
+		// A CLIENT ON ITS WAY OUT IS NEVER ARMED FOR POLLIN. It is only still
+		// here so its queued ERROR can drain, and reading from it would feed
+		// more commands to a client already marked for death — the exact
+		// use-after-free the deferred disconnect exists to prevent. With
+		// nothing left to write it is armed for nothing at all: this pass's
+		// reap will destroy it, and 0 events keeps it from spinning poll() in
+		// the meantime.
+		if (it->second->isDisconnecting())
+			pfd.events = it->second->hasPendingOutput() ? POLLOUT : 0;
+		else
+		{
+			pfd.events = POLLIN;
+			// POLLOUT ONLY WHEN THERE IS SOMETHING TO WRITE. A socket with
+			// room in its send buffer is always writable, so arming it
+			// unconditionally makes poll() return immediately every single
+			// iteration and the loop spins at 100% CPU with nothing to do —
+			// the most common way this design goes wrong, and the first thing
+			// an evaluator measures.
+			if (it->second->hasPendingOutput())
+				pfd.events |= POLLOUT;
+		}
 		pfd.revents = 0;
 		_pollFds.push_back(pfd);
 	}
@@ -381,24 +411,16 @@ void	Server::handleReadable(int fd)
 	char	buf[irc::RECV_CHUNK];
 	ssize_t	n = recv(fd, buf, sizeof(buf), 0);
 
-	if (n == 0)
+	// ERRNO IS NEVER CONSULTED AFTER recv(). The subject forbids using it to
+	// drive a decision here, and the byte count alone is enough to make one:
+	// 0 is end of stream, anything below it is a transport error, and both
+	// end the same way. The rare transient — POLLIN raised for a segment that
+	// is discarded before we read — costs that one client its connection
+	// instead of a retry, which is the price of the rule.
+	if (n <= 0)
 	{
-		// End of stream: the peer called close() or shutdown(). This is the
-		// ONLY reliable indication of an orderly disconnect.
-		disconnectClient(*client, "Client closed connection");
-		return ;
-	}
-	if (n < 0)
-	{
-		// EAGAIN/EWOULDBLOCK on a non-blocking fd means "nothing right now" —
-		// neither an error nor a disconnect. Treating it as failure is the
-		// classic non-blocking bug, and it is reachable here even with
-		// level-triggered poll(): a checksum-failed segment can raise POLLIN
-		// and then be discarded before we read. EINTR is a signal landing
-		// mid-call; the next poll() will tell us again.
-		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-			return ;
-		disconnectClient(*client, std::strerror(errno));
+		disconnectClient(*client,
+			n == 0 ? "Client closed connection" : "Read error");
 		return ;
 	}
 
@@ -562,17 +584,17 @@ void	Server::handleWritable(int fd)
 	const std::string	&pending = client->getOutputBuffer();
 	ssize_t				n = send(fd, pending.data(), pending.size(), 0);
 
+	// NO ERRNO HERE EITHER, for the same reason as the read side. What this
+	// path still gets right is the PARTIAL send: n below pending.size() is not
+	// an error, it is the normal answer from a socket whose window is nearly
+	// full, and consumeOutput drops exactly the bytes the kernel took. POLLOUT
+	// stays armed while anything remains, so the rest goes out next pass.
+	//
+	// EPIPE lands here rather than killing the process, because SIGPIPE is
+	// ignored at startup.
 	if (n < 0)
 	{
-		// A full kernel send buffer is EAGAIN, and it is the NORMAL case for a
-		// slow client: the data stays queued and POLLOUT fires again when the
-		// window opens. Treating it as an error would disconnect exactly the
-		// clients this buffering exists to serve.
-		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-			return ;
-		// EPIPE lands here rather than killing the process, because SIGPIPE is
-		// ignored at startup.
-		disconnectClient(*client, std::strerror(errno));
+		disconnectClient(*client, "Write error");
 		return ;
 	}
 	client->consumeOutput(static_cast<std::size_t>(n));
@@ -609,6 +631,21 @@ void	Server::disconnectClient(Client &client, const std::string &reason)
 	sendToClient(client, "ERROR :" + reason);
 }
 
+// Scans for a marked client that still has something queued.
+//
+// A plain loop over a handful of fds, run once per iteration right before
+// poll(). It exists only to choose that call's timeout — see run().
+bool	Server::hasLingeringClients() const
+{
+	for (std::map<int, Client *>::const_iterator it = _clients.begin();
+		it != _clients.end(); ++it)
+	{
+		if (it->second->isDisconnecting() && it->second->hasPendingOutput())
+			return (true);
+	}
+	return (false);
+}
+
 // The single point where a Client is destroyed, called at the END of a poll
 // iteration and nowhere else.
 void	Server::reapDisconnected()
@@ -625,28 +662,32 @@ void	Server::reapDisconnected()
 
 		Client	*client = it->second;
 
+		// THE LINGER, and the reason this function no longer writes anything.
+		//
+		// What is queued here is "ERROR :<reason>" — and whatever was queued
+		// alongside it, like the 464 of a wrong password or the whole welcome
+		// burst of a session that arrived pipelined with its QUIT. Closing now
+		// would discard all of it: the client would see a socket shut in
+		// silence with no idea why.
+		//
+		// So the client is left in place for another pass. buildPollFds arms
+		// POLLOUT for it, handleWritable drains it exactly like any other
+		// write, and the fd closes below once the queue is empty. Every send()
+		// in this server is then behind a poll() readiness event, with no
+		// blind write at close time.
+		//
+		// The budget is what makes that safe: a peer that has stopped reading
+		// cannot hold its slot for ever, it just loses whatever was left.
+		if (client->hasPendingOutput()
+			&& client->lingerRounds() < irc::MAX_LINGER_ROUNDS)
+		{
+			client->bumpLinger();
+			++it;
+			continue ;
+		}
+
 		std::cout << "ircserv: closing fd " << it->first << " ("
 			<< client->getQuitReason() << ")" << std::endl;
-
-		// BEST-EFFORT FLUSH, while the fd is still open. This is the only
-		// reason the disconnect is deferred rather than immediate: it is what
-		// gets "ERROR :<reason>" — and the 464 before it, and the QUIT echo —
-		// onto the wire at all. Once close() runs, anything still queued is
-		// gone.
-		//
-		// One send, no retry and no waiting for POLLOUT: the client is leaving,
-		// and a peer that has stopped reading must not be able to hold a slot
-		// in the loop by refusing to drain. If the kernel takes only part of
-		// it, the rest is lost, which is the correct trade here.
-		if (client->hasPendingOutput())
-		{
-			const std::string	&pending = client->getOutputBuffer();
-			ssize_t				sent = send(it->first, pending.data(),
-									pending.size(), 0);
-
-			if (sent > 0)
-				client->consumeOutput(static_cast<std::size_t>(sent));
-		}
 
 		// sweepChannels is a no-op until step 4.5, and it MUST stay ahead of
 		// the delete: Channel holds non-owning Client*, so a client freed while

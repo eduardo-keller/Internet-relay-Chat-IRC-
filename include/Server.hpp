@@ -79,9 +79,10 @@ class Server
 		//
 		// The client is flagged, the QUIT is broadcast to its peers, and
 		// "ERROR :<reason>" is queued. The poll loop then reaps every marked
-		// client at the END of the iteration: one best-effort send() to flush
-		// what is queued, remove from all channels and invite lists, close,
-		// delete.
+		// client at the END of the iteration: remove from all channels and
+		// invite lists, close, delete. A client with output still queued
+		// lingers for a bounded number of passes first, so that what was
+		// queued leaves through POLLOUT rather than a blind write.
 		//
 		// Deleting immediately would be a use-after-free. One TCP packet can
 		// carry "QUIT\r\nPRIVMSG #c :hi\r\n"; the dispatch loop is still
@@ -120,9 +121,20 @@ class Server
 		void	handleWritable(int fd);
 		void	handleLine(Client &client, const std::string &line);
 		// Runs once at the end of every poll iteration, after all events are
-		// handled: flushes, closes and deletes every client marked by
-		// disconnectClient. The only place a Client is ever deleted.
+		// handled: closes and deletes every client marked by disconnectClient
+		// whose queued output has drained — or whose linger budget has run
+		// out. The only place a Client is ever deleted.
+		//
+		// It does NOT write. A marked client with output still queued is left
+		// in place for another pass, where buildPollFds arms POLLOUT for it
+		// and handleWritable flushes it like any other write. That is what
+		// keeps every send() in this server behind a poll() readiness event.
 		void	reapDisconnected();
+		// True while at least one marked client is still waiting to flush.
+		// run() uses it to pick a finite poll() timeout, because a peer that
+		// never becomes writable would otherwise produce no event at all and
+		// the linger budget would never advance.
+		bool	hasLingeringClients() const;
 
 		// The two Channel-facing internals. Their bodies live in their own
 		// translation unit, so that Server links while src/Channel.cpp does

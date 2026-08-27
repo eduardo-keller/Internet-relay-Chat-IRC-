@@ -35,6 +35,27 @@ namespace irc
 	// How much we ask recv() for per readiness event.
 	const std::size_t	RECV_CHUNK = 4096;
 
+	// --- the linger budget ------------------------------------------------
+	//
+	// A client marked for disconnection is NOT closed on the spot: it stays in
+	// the poll set for a few more iterations, with POLLOUT armed, so that the
+	// "ERROR :<reason>" it was queued — and any numeric queued alongside it,
+	// like the 464 of a wrong password — goes out through the ordinary write
+	// path. That is what keeps EVERY send() in this server driven by a
+	// readiness event rather than written blind at close time.
+	//
+	// The budget is what stops a peer that has stopped reading from holding an
+	// fd for ever: after this many reap passes the client is closed with
+	// whatever is left undelivered.
+	const int			MAX_LINGER_ROUNDS = 3;
+
+	// poll() blocks for ever (-1) in the normal case, which is what keeps an
+	// idle server at 0% CPU. While somebody is lingering that is wrong: if the
+	// peer never becomes writable, no event ever arrives and the linger budget
+	// would never advance. This finite timeout is used ONLY while at least one
+	// client is lingering.
+	const int			LINGER_POLL_MS = 200;
+
 	// Name bounds. RFC 2812 section 2.3.1 allows only 9 characters for a
 	// nickname, but that is a 1988 figure: every deployed server raised it,
 	// and irssi fills the nickname from the system username, so a 9-character

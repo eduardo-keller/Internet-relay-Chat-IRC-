@@ -167,6 +167,35 @@ sleep 1
 check "nick e casado ignorando maiusculas, e entregue com a grafia do dono" \
 	"1" "$(seen "$OUTA" | grep -c '^:elba!elba@127.0.0.1 PRIVMSG ana :maiusculas$')"
 
+# 3.5 A LIST OF TARGETS. RFC 2812 section 3.3.1 defines msgtarget as
+#     "msgto *( "," msgto )", and this is the half the unit tests cannot reach:
+#     delivery to two NICKNAMES at once needs two live sockets.
+talk 'PASS secret\r\nNICK fabi\r\nUSER fabi 0 * :Fabi\r\nPRIVMSG ana,beto :para os dois\r\n' > /dev/null
+sleep 1
+check "lista de nicks entrega ao primeiro" \
+	"1" "$(seen "$OUTA" | grep -c '^:fabi!fabi@127.0.0.1 PRIVMSG ana :para os dois$')"
+check "e ao segundo, cada um endereçado a si" \
+	"1" "$(seen "$OUTB" | grep -c '^:fabi!fabi@127.0.0.1 PRIVMSG beto :para os dois$')"
+
+#     Nick and channel in the same list, and a bad target between them: the
+#     refusal names ONLY the bad one, and the good targets are still served.
+OUT=$(talk 'PASS secret\r\nNICK gabi\r\nUSER gabi 0 * :Gabi\r\nJOIN #sala\r\nPRIVMSG ana,#naoexiste,#sala :misto\r\n')
+sleep 1
+check "alvo invalido no meio da lista -> um 403 nomeando so ele" \
+	"1" "$(printf '%s\n' "$OUT" | grep -c ' 403 gabi #naoexiste :No such channel')"
+check "o nick antes dele foi servido" \
+	"1" "$(seen "$OUTA" | grep -c '^:gabi!gabi@127.0.0.1 PRIVMSG ana :misto$')"
+check "e o canal depois dele tambem" \
+	"1" "$(seen "$OUTB" | grep -c '^:gabi!gabi@127.0.0.1 PRIVMSG #sala :misto$')"
+
+#     An empty field names nobody, so it earns no error at all (D18).
+OUT=$(talk 'PASS secret\r\nNICK hugo\r\nUSER hugo 0 * :Hugo\r\nPRIVMSG ana,,beto :campo vazio\r\n')
+sleep 1
+check "campo vazio na lista nao gera erro" \
+	"0" "$(printf '%s\n' "$OUT" | grep -c ' 401 \| 403 ')"
+check "e os alvos reais em volta recebem" \
+	"1" "$(seen "$OUTB" | grep -c '^:hugo!hugo@127.0.0.1 PRIVMSG beto :campo vazio$')"
+
 # 4. THE 504-BYTE CASE. The text below is legal on the way in — the whole
 #    incoming line is under 512 — but the server prepends ":caio!caio@..." on
 #    the way out and the result would be 528. It must arrive cut to exactly

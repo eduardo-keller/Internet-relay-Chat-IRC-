@@ -1222,6 +1222,77 @@ static void	testPrivmsgToChannel(void)
 		"the target is matched ignoring case and relayed in its own spelling");
 }
 
+// The target is a LIST, exactly like JOIN's and PART's.
+//
+// The nick side of a list cannot be proved here — findClientByNick returns
+// NULL in a unit test, because clients only enter Server::_clients through
+// accept() — so what is provable is the channel side, the per-target refusals,
+// and above all that ONE BAD TARGET DOES NOT SINK THE REST. The end-to-end
+// delivery to several nicknames is proved over a socket in tests/it/privmsg.sh.
+static void	testPrivmsgSeveralTargets(void)
+{
+	Server	server(6667, "secret");
+	Client	alice(-1, "localhost");
+	Client	bob(-1, "localhost");
+
+	makeUser(alice, "alice");
+	makeUser(bob, "bob");
+	feed(server, alice, "JOIN #um");
+	feed(server, alice, "JOIN #dois");
+	feed(server, bob, "JOIN #um");
+	feed(server, bob, "JOIN #dois");
+
+	feed(server, alice, "PRIVMSG #um,#dois :para os dois");
+	check(contains(bob.getOutputBuffer(),
+			":alice!alice@localhost PRIVMSG #um :para os dois\r\n"),
+		"a comma-separated list delivers to the first target");
+	check(contains(bob.getOutputBuffer(),
+			":alice!alice@localhost PRIVMSG #dois :para os dois\r\n"),
+		"and to the second, each named in its own line");
+
+	// The refusal names ONE target, not the whole list, and the targets around
+	// it are still served. Failing whole would make a list useless.
+	const std::string	before = bob.getOutputBuffer();
+
+	alice.consumeOutput(alice.getOutputBuffer().size());
+	feed(server, alice, "PRIVMSG #um,#nada,#dois :parcial");
+	checkEqual(alice.getOutputBuffer(),
+		":ircserv 403 alice #nada :No such channel\r\n",
+		"a bad target in the middle is refused by name, not as the whole list");
+	check(contains(bob.getOutputBuffer(), " PRIVMSG #um :parcial\r\n"),
+		"the target before it was still served");
+	check(contains(bob.getOutputBuffer(), " PRIVMSG #dois :parcial\r\n"),
+		"and so was the one after it");
+	check(before != bob.getOutputBuffer(), "so the message did go out");
+
+	// An empty field names nobody, so there is nothing to refuse — the same
+	// rule joinOneChannel and partOneChannel follow (D18).
+	alice.consumeOutput(alice.getOutputBuffer().size());
+	feed(server, alice, "PRIVMSG #um,,#dois :campo vazio");
+	checkEqual(alice.getOutputBuffer(), "",
+		"an empty field in the list is skipped in silence");
+	check(contains(bob.getOutputBuffer(), " PRIVMSG #um :campo vazio\r\n"),
+		"and the real targets around it are delivered");
+
+	// A nickname nobody holds is one 401 for THAT target, and the channel in
+	// the same list is still served.
+	alice.consumeOutput(alice.getOutputBuffer().size());
+	feed(server, alice, "PRIVMSG ninguem,#um :misto");
+	checkEqual(alice.getOutputBuffer(),
+		":ircserv 401 alice ninguem :No such nick/channel\r\n",
+		"an unknown nickname in a list is 401 for that target alone");
+	check(contains(bob.getOutputBuffer(), " PRIVMSG #um :misto\r\n"),
+		"and the channel beside it still receives the message");
+
+	// 411 and 412 are answers about the COMMAND, so they come before the split
+	// and are never repeated per target.
+	alice.consumeOutput(alice.getOutputBuffer().size());
+	feed(server, alice, "PRIVMSG #um,#dois");
+	checkEqual(alice.getOutputBuffer(),
+		":ircserv 412 alice :No text to send\r\n",
+		"a list with no text is one 412, not one per target");
+}
+
 // The nick path. In a unit test findClientByNick always returns NULL, because
 // clients only enter Server::_clients through accept() — so what is provable
 // here is the ERROR, and the delivery is proved over a socket in
@@ -1619,6 +1690,7 @@ void	runCommandChannelTests(void)
 	testPartSeveralChannels();
 	testPrivmsgErrors();
 	testPrivmsgToChannel();
+	testPrivmsgSeveralTargets();
 	testPrivmsgToUnknownUser();
 	testTopicErrors();
 	testTopicQuery();

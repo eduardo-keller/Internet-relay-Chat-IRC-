@@ -357,46 +357,21 @@ void	cmdPart(Server &server, Client &sender, const Message &msg)
 	}
 }
 
-// PRIVMSG <target> :<text>
+// One target of a PRIVMSG list. A channel or a nickname — the '#' decides.
 //
-// THIS IS THE COMMAND THE SUBJECT IS ACTUALLY ABOUT: "all the messages sent
-// from one client to a channel have to be forwarded to every other client that
-// joined the channel". Everything else in this file exists so that this line
-// can be delivered.
-//
-// Steps 4 and 5 of docs/FASE3.md were planned as two slices — channel first,
-// then user — and are done as one. Splitting them would mean spending a whole
-// step answering a message to a nickname with either a 401 that lies or a
-// silence that strands it, and the two paths are ten lines apart in the same
-// handler.
-void	cmdPrivmsg(Server &server, Client &sender, const Message &msg)
+// Every refusal in here is addressed to the SENDER and names the one target
+// that failed, which is what makes a list usable: "PRIVMSG bob,#nope :hi"
+// delivers to bob and answers 403 for #nope, rather than failing whole.
+static void	privmsgOneTarget(Server &server, Client &sender,
+				const std::string &target, const std::string &text)
 {
-	// 411 NAMES THE COMMAND in its text, which is why it takes one at all:
-	// NOTICE and PRIVMSG share the code, and the client shows the string.
-	if (msg.params.empty())
-	{
-		server.sendToClient(sender, irc::numeric(server.getServerName(),
-				irc::ERR_NORECIPIENT, sender.getNickname(),
-				":No recipient given (PRIVMSG)"));
+	// Empty field, empty answer — the same rule joinOneChannel and
+	// partOneChannel follow (D18). "PRIVMSG a,,b" names no target in the
+	// middle, so there is nothing there to refuse.
+	if (target.empty())
 		return ;
-	}
 
-	// Both the missing parameter and the present-but-empty one, which are
-	// different messages on the wire — "PRIVMSG #c" and "PRIVMSG #c :" — and
-	// the same thing to a reader: nothing to say. Relaying an empty line to a
-	// whole channel is not a service to anybody.
-	if (msg.params.size() < 2 || msg.params[1].empty())
-	{
-		server.sendToClient(sender, irc::numeric(server.getServerName(),
-				irc::ERR_NOTEXTTOSEND, sender.getNickname(),
-				":No text to send"));
-		return ;
-	}
-
-	const std::string	&target = msg.params[0];
-	const std::string	&text = msg.params[1];
-
-	if (!target.empty() && target[0] == '#')
+	if (target[0] == '#')
 	{
 		Channel	*channel = server.findChannel(target);
 
@@ -448,6 +423,64 @@ void	cmdPrivmsg(Server &server, Client &sender, const Message &msg)
 	server.sendToClient(*recipient,
 		irc::fromClient(sender.prefix(), "PRIVMSG",
 			recipient->getNickname() + " :" + text));
+}
+
+// PRIVMSG <target>*( "," <target> ) :<text>
+//
+// THIS IS THE COMMAND THE SUBJECT IS ACTUALLY ABOUT: "all the messages sent
+// from one client to a channel have to be forwarded to every other client that
+// joined the channel". Everything else in this file exists so that this line
+// can be delivered.
+//
+// The target is a LIST, exactly like JOIN's and PART's, and it is split with
+// the same helper. RFC 2812 section 3.3.1 defines msgtarget as
+// "msgto *( "," msgto )", and a client that types "/msg alice,bob hi" expects
+// both to get it.
+//
+// No cap on the list length is needed: a whole message is capped at 512 bytes
+// by irc::MAX_MESSAGE_LEN, so the target field cannot hold more than a few
+// hundred names, and every delivery is already bounded by the recipient's own
+// SendQ. The limit exists by construction.
+void	cmdPrivmsg(Server &server, Client &sender, const Message &msg)
+{
+	// 411 AND 412 COME BEFORE THE SPLIT, and stay outside the loop: they are
+	// answers about the command as a whole, not about one target. 411 names
+	// the command in its text, which is why it takes one at all — NOTICE and
+	// PRIVMSG share the code, and the client shows the string.
+	if (msg.params.empty())
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NORECIPIENT, sender.getNickname(),
+				":No recipient given (PRIVMSG)"));
+		return ;
+	}
+
+	// Both the missing parameter and the present-but-empty one, which are
+	// different messages on the wire — "PRIVMSG #c" and "PRIVMSG #c :" — and
+	// the same thing to a reader: nothing to say. Relaying an empty line to a
+	// whole channel is not a service to anybody.
+	if (msg.params.size() < 2 || msg.params[1].empty())
+	{
+		server.sendToClient(sender, irc::numeric(server.getServerName(),
+				irc::ERR_NOTEXTTOSEND, sender.getNickname(),
+				":No text to send"));
+		return ;
+	}
+
+	const std::vector<std::string>	targets = utils::split(msg.params[0], ',');
+	const std::string				&text = msg.params[1];
+
+	for (std::vector<std::string>::size_type i = 0; i < targets.size(); ++i)
+	{
+		// THE SAME GUARD cmdJoin CARRIES, and for the same reason. Every
+		// refusal above goes to the SENDER, so a long list of bad targets
+		// queues onto the sender's own SendQ and can overflow it, which marks
+		// them for disconnection with targets still to go. Carrying on would
+		// keep queueing onto a client being reaped at the end of this pass.
+		if (sender.isDisconnecting())
+			return ;
+		privmsgOneTarget(server, sender, targets[i], text);
+	}
 }
 
 // TOPIC <channel> [ :<topic> ]

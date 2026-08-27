@@ -94,6 +94,18 @@ class Client
 		void				markDisconnecting(const std::string &reason);
 		const std::string	&getQuitReason() const;
 
+		// --- the linger budget --------------------------------------------
+		// A marked client stays in the poll set for a bounded number of reap
+		// passes so its queued ERROR can leave through POLLOUT like any other
+		// write. bumpLinger is called once per pass it survives; the reaper
+		// closes it once lingerRounds reaches irc::MAX_LINGER_ROUNDS.
+		int					lingerRounds() const;
+		void				bumpLinger();
+		// Throws away whatever is still queued, which makes the next reap pass
+		// close this client immediately. Used when the peer is already gone —
+		// POLLERR/POLLHUP — and waiting to write to it is pointless.
+		void				dropPendingOutput();
+
 	private:
 		friend class Server;
 
@@ -119,6 +131,7 @@ class Client
 		std::string	_quitReason;
 		std::string	_readBuffer;
 		std::string	_outputBuffer;
+		int			_lingerRounds;
 };
 
 #endif
