@@ -1,7 +1,6 @@
 # Guia `ft_irc`
 
-Este roteiro segue a mesma ordem e os mesmos subtítulos de
-`docs/ft_irc_evaluation.md`. Ele foi escrito para esta implementação, cujo
+Este roteiro foi escrito para esta implementação, cujo
 executável é `ircserv`, cuja senha de exemplo é `secret` e cujo cliente IRC de
 referência é o **irssi**.
 
