@@ -1,13 +1,9 @@
-# Guia completo da avaliação do `ft_irc`
+# Guia `ft_irc`
 
 Este roteiro segue a mesma ordem e os mesmos subtítulos de
 `docs/ft_irc_evaluation.md`. Ele foi escrito para esta implementação, cujo
 executável é `ircserv`, cuja senha de exemplo é `secret` e cujo cliente IRC de
 referência é o **irssi**.
-
-> Execute tudo a partir da raiz do repositório clonado pelo avaliador. Durante
-> a avaliação, não altere fontes, headers, `Makefile`, `README.md` ou scripts.
-> Os comandos abaixo apenas compilam, executam ou inspecionam o projeto.
 
 ## Convenções e preparação dos terminais
 
@@ -15,28 +11,15 @@ Use a porta `6667` e a senha `secret` em todo o roteiro. Se a porta estiver
 ocupada, escolha outra porta livre entre `1024` e `65535` e substitua `6667`
 em todos os comandos.
 
-Antes de iniciar:
-
-```sh
-pwd
-ss -ltnp 'sport = :6667'
-```
-
-Abra **cinco terminais** na raiz do repositório:
+sugestao:
 
 | Terminal | Uso principal |
 |---|---|
 | **T1** | compilação, servidor e depois Valgrind |
 | **T2** | irssi da operadora `alice` |
 | **T3** | irssi do usuário normal `bob` |
-| **T4** | `nc`, normalmente com `carol`, e pacotes parciais |
-| **T5** | inspeção, monitoramento, flood controlado e eventualmente `dave` |
+| **T4** | `nc`,  `carol`, e pacotes parciais |
 
-Para voltar ao shell do irssi sem fechar a conexão, pressione `Ctrl+Z`; use
-`fg` para retomá-lo. Para sair normalmente do irssi, use `/quit motivo`. Para
-encerrar um `nc`, pressione `Ctrl+C`.
-
-Resultados IRC importantes que aparecerão nos testes:
 
 | Código | Significado |
 |---:|---|
@@ -58,15 +41,6 @@ Resultados IRC importantes que aparecerão nos testes:
 
 # Introdução
 
-Conduza a avaliação de forma educada, construtiva e honesta. Quando um
-comportamento for ambíguo, mostre o comando, o resultado observado e o trecho
-de código antes de discutir a interpretação. Falha funcional, crash e
-trapaça devem ser sinalizados conforme as flags da ferramenta de avaliação;
-fora o caso de trapaça, vale revisar o erro com a equipe mesmo quando a régua
-encerra a avaliação.
-
-Antes dos testes, todos devem ter lido o subject. Uma resposta curta sobre o
-projeto pode ser:
 
 > Este projeto implementa um servidor IRC em C++98. Ele aceita vários clientes
 > TCP/IP sem `fork`, usa descritores não bloqueantes e um único `poll()` para
@@ -75,189 +49,11 @@ projeto pode ser:
 > mensagens privadas e os comandos de operador `KICK`, `INVITE`, `TOPIC` e
 > `MODE` com os modos `i`, `t`, `k`, `o` e `l`.
 
-Para mostrar a visão geral do código:
 
-```sh
-sed -n '1,220p' README.md
-sed -n '1,180p' include/Server.hpp
-sed -n '15,60p' src/CommandTable.cpp
-```
 
-# Guidelines
-
-## Confirmar o repositório e o clone
-
-O avaliador deve clonar o repositório oficial em um diretório vazio. No clone
-usado na avaliação, execute:
-
-```sh
-IRC_EVAL_DIR=$(mktemp -d /tmp/ft_irc-eval.XXXXXX)
-git clone <URL_OFICIAL_DO_REPOSITORIO> "$IRC_EVAL_DIR"
-cd "$IRC_EVAL_DIR"
-```
-
-Substitua o texto entre `<...>` pela URL mostrada na Intra. Não execute uma
-URL copiada de fonte não conferida. Em seguida:
-
-```sh
-git remote -v
-git status --short
-git log -5 --oneline --decorate
-git ls-files | sort
-```
-
-Confirme os logins dos integrantes, a URL oficial e que o projeto esperado é
-o `ft_irc`. Em um clone recém-criado, `git status --short` deve ficar vazio
-antes da compilação.
-
-## Verificar aliases e comandos usados
-
-```sh
-type git make c++ nc irssi valgrind
-alias
-```
-
-O resultado deve apontar para comandos reais, não aliases ou funções que
-substituam silenciosamente `git`, `make`, compilador ou ferramentas de teste.
-
-## Revisar scripts antes de usá-los
-
-Os testes automáticos são auxiliares, não substituem a avaliação manual. Antes
-de rodá-los, liste e leia os scripts:
-
-```sh
-find tests/it -maxdepth 1 -type f -name '*.sh' -print | sort
-less tests/it/full_session.sh
-less tests/it/hardening.sh
-less tests/it/read_path.sh
-less tests/it/write_path.sh
-```
-
-Saia do `less` com `q`. Se o avaliador não concordar com um script, não o
-execute; faça o caso manual equivalente descrito neste guia.
-
-## Regra de falha fatal
-
-Durante toda a defesa, mantenha **T1 visível**. Qualquer segfault, abort,
-terminação inesperada ou travamento do servidor encerra a avaliação com zero.
-Depois de cada situação agressiva, confirme no T5:
-
-```sh
-pgrep -af ircserv
-ss -ltnp 'sport = :6667'
-```
-
-## Anexos
-
-A régua aponta para o subject oficial e para um arquivo auxiliar `bircd`. Para
-esta defesa, o conteúdo obrigatório também está transcrito em
-`docs/ft_irc_requirements.md`. Antes de avaliar, abra o subject fornecido na
-Intra e compare-o com esse documento:
-
-```sh
-sed -n '1,320p' docs/ft_irc_requirements.md
-```
-
-O `bircd.tar.gz` é material auxiliar da avaliação, não uma dependência do
-projeto e não deve ser incorporado ao código ou usado para substituir testes
-do executável entregue.
-
-# Parte Obrigatória
-
-## README e Verificação de Conformidade
-
-No T5:
-
-```sh
-head -n 1 README.md
-rg -n '^## (Descrição|Instruções|Recursos)$' README.md
-sed -n '1,260p' README.md
-```
-
-O que deve ser verificado:
-
-1. A primeira linha é exatamente, em itálico:
-
-   ```text
-   *Este projeto foi criado como parte do currículo da 42 por brnascim, ekeller-.*
-   ```
-
-2. `## Descrição` explica o servidor, protocolo, arquitetura e funcionalidades.
-3. `## Instruções` mostra pré-requisitos, `make`, execução de `ircserv`, irssi,
-   `nc` e testes.
-4. `## Recursos` lista RFCs, `poll`, networking, irssi e descreve onde IA foi
-   usada.
-
-Resposta sugerida:
-
-> O README contém os quatro elementos pedidos. A primeira linha traz os dois
-> logins no formato exato; Descrição apresenta o servidor e sua arquitetura;
-> Instruções cobre compilação e execução; Recursos lista as referências e
-> explica as tarefas apoiadas por IA e a revisão humana final.
-
-Se qualquer elemento estiver ausente no repositório oficialmente entregue, a
-régua determina nota zero.
-
-> **Confirme o tamanho real do grupo na Intra:** o cabeçalho da régua recebida
-> diz que a equipe tem 3 estudantes, enquanto a primeira linha atual do README
-> lista `brnascim` e `ekeller-`. Se o grupo oficial realmente tiver um terceiro
-> integrante, o login dele precisa constar nessa primeira linha; se o grupo
-> oficial tiver apenas dois, explique que o número 3 veio do cabeçalho/template
-> da régua. Não invente um login apenas para coincidir com o template.
-
-## Verificações básicas
-
-### 1. Existe um `Makefile`
-
-No T1:
-
-```sh
-ls -l Makefile
-sed -n '1,220p' Makefile
-```
-
-Mostre os alvos `all`, `clean`, `fclean`, `re` e o alvo do executável
-`$(NAME)`, com `NAME := ircserv`.
-
-### 2. Compilação, flags e relink desnecessário
-
-Ainda no T1:
-
-```sh
-make fclean
-make
-make
-```
-
-Resultados esperados:
-
-- o primeiro `make` termina sem warnings ou erros e cria `./ircserv`;
-- a linha de compilação contém `c++ -Wall -Wextra -Werror -std=c++98`;
-- o segundo `make` responde `Nothing to be done for 'all'` e não relinka.
-
-Verificações adicionais:
-
-```sh
-test -x ./ircserv && echo 'ircserv executável: OK'
-file ./ircserv
-find src include -type f \( -name '*.cpp' -o -name '*.hpp' \) -print | sort
-rg -n '^(NAME|CXX|CXXFLAGS)|^(all|clean|fclean|re):' Makefile
-```
-
-Resposta sugerida:
-
-> O projeto é C++98, compilado por `c++` com `-Wall -Wextra -Werror
-> -std=c++98`. O binário produzido se chama `ircserv`; dependências `.d`
-> evitam under-build e o Makefile não relinka quando nada mudou.
 
 ### 3. Quantas chamadas `poll()` existem?
 
-No T5:
-
-```sh
-rg -n 'poll\s*\(' src include --glob '*.{cpp,hpp}'
-nl -ba src/Server.cpp | sed -n '166,242p'
-```
 
 Os comentários também contêm a palavra `poll`, mas há **uma única chamada
 executável**, em `Server::run()`:
@@ -267,21 +63,14 @@ int timeout = hasLingeringClients() ? irc::LINGER_POLL_MS : -1;
 int ready = poll(&_pollFds[0], _pollFds.size(), timeout);
 ```
 
-Resposta sugerida:
-
 > Existe exatamente uma chamada a `poll()`, em `Server::run()`. Antes dela,
 > `buildPollFds()` cria um vetor contendo o socket de escuta e todos os clientes.
 > O mesmo retorno de `poll()` governa `accept`, leitura e escrita. O timeout é
 > `-1` durante operação normal e passa a `LINGER_POLL_MS` somente enquanto um
 > cliente marcado para desconexão aguarda a fila de saída esvaziar.
 
-Para mostrar como os eventos são montados:
 
-```sh
-nl -ba src/Server.cpp | sed -n '262,350p'
-```
-
-Explique que o socket de escuta e os clientes ativos têm `POLLIN`; `POLLOUT` só
+Socket de escuta e os clientes ativos têm `POLLIN`(socket pronto para leitura); `POLLOUT` (socket pronto para enviar dados) só
 é armado quando aquele cliente possui saída pendente. Um cliente já marcado
 para desconexão deixa de receber `POLLIN` e permanece apenas com `POLLOUT`
 enquanto houver algo a enviar. Isso evita novos comandos depois do `QUIT` e
@@ -289,89 +78,22 @@ evita busy loop.
 
 ### 4. `accept`, `recv` e `send` em relação ao `poll()`
 
-Localize as syscalls reais:
-
-```sh
-rg -n '\b(accept|recv|send)\s*\(' src --glob '*.cpp'
-nl -ba src/Server.cpp | sed -n '179,257p'
-nl -ba src/Server.cpp | sed -n '308,453p'
-nl -ba src/Server.cpp | sed -n '543,707p'
-```
-
-Resposta sugerida:
-
 > O `accept()` só é chamado quando o único `poll()` marcou `POLLIN` no socket
 > de escuta. O `recv()` só é chamado por `handleReadable()` após `POLLIN`. O
-> único `send()` do projeto ocorre em `handleWritable()` após `POLLOUT`. Cada
-> evento executa no máximo uma syscall; dados restantes aguardam o próximo
-> `poll()`.
+> único `send()` do projeto ocorre em `handleWritable()` após `POLLOUT`.
 
-Mostre especificamente:
-
-- `Server::run()`, em `src/Server.cpp`: tradução de `revents` para handlers;
-- `Server::acceptNewClient()`: um `accept()` por prontidão;
-- `Server::handleReadable()`: um `recv()` por prontidão;
-- `Server::handleWritable()`: um `send()` por prontidão;
-- `Client::getOutputBuffer()` e `consumeOutput()`, em `src/Client.cpp`: suporte
-  a `send()` parcial.
-
-#### Desconexão sem `send()` fora de `POLLOUT`
-
-Confirme que `reapDisconnected()` não chama mais `send()`:
-
-```sh
-nl -ba src/Server.cpp | sed -n '634,707p'
-nl -ba include/Limits.hpp | sed -n '38,57p'
-nl -ba src/Client.cpp | sed -n '462,499p'
-```
-
-Resposta sugerida:
-
-> `disconnectClient()` apenas marca o cliente e enfileira a resposta. Se ainda
-> existe saída, `buildPollFds()` mantém esse fd somente com `POLLOUT`, e o envio
-> acontece pelo mesmo `handleWritable()` usado por qualquer cliente. O reaper
-> apenas espera a fila esvaziar ou o limite de três passagens expirar; ele não
-> escreve no socket. Um timeout de 200 ms, usado apenas durante o linger, impede
-> que um peer que nunca fica gravável retenha o fd indefinidamente.
-
-Depois de revisar o script, a validação automática específica desse caminho é:
-
-```sh
-./tests/it/write_path.sh 6792
-```
-
-Na última atualização deste guia, o resultado foi **5 passed, 0 failed**,
-incluindo a chegada de `ERROR` antes do fechamento e CPU ociosa sem busy loop.
 
 ### 5. Uso de `errno` após as syscalls
 
-```sh
-rg -n 'errno|EAGAIN|EWOULDBLOCK|EINTR' src/Server.cpp
-nl -ba src/Server.cpp | sed -n '194,206p;319,339p;404,427p;577,601p'
-```
 
-Resposta exata sobre esta implementação:
+> `accept()`, `recv()` e `send()` não consultam `errno`.
 
-> `accept()`, `recv()` e `send()` não consultam `errno` e nunca são repetidos
-> dentro do handler. `accept()` retorna quando falha. Depois de `recv()`, o
-> servidor decide apenas pelo número de bytes: `n <= 0` desconecta. Depois de
-> `send()`, `n < 0` marca erro de escrita e um valor positivo consome exatamente
-> os bytes enviados. O próximo acesso ao fd depende de um novo evento de
-> `poll()`.
-
-O `rg` ainda encontra `errno` no tratamento de falhas de inicialização e após
-o próprio `poll()`. Isso não contradiz o quesito: a proibição desta parte da
-régua é usar `errno` para dirigir comportamento depois de `accept`, `recv` ou
-`send`. Mostre que não há referência a `errno` nos respectivos handlers.
+não pode usar `errno` para dirigir comportamento depois de `accept`, `recv` ou
+`send`.
 
 ### 6. Uso permitido de `fcntl()`
 
-```sh
-rg -n '\bfcntl\s*\(' src include --glob '*.{cpp,hpp}'
-nl -ba src/Server.cpp | sed -n '129,164p;312,340p'
-```
-
-Há duas chamadas executáveis, ambas exatamente no formato permitido:
+Há duas chamadas executáveis:
 
 ```cpp
 fcntl(_listenFd, F_SETFL, O_NONBLOCK);
@@ -381,30 +103,7 @@ fcntl(fd, F_SETFL, O_NONBLOCK);
 Resposta sugerida:
 
 > Uma chamada torna o socket de escuta não bloqueante; a outra torna cada
-> socket retornado por `accept()` não bloqueante. Não há outro comando ou flag
-> de `fcntl()` no projeto.
-
-### 7. Sem `fork` e toda E/S não bloqueante
-
-```sh
-rg -n '\bfork\s*\(' src include --glob '*.{cpp,hpp}' || echo 'fork ausente: OK'
-```
-
-Mostre também `setupListenSocket()`, `acceptNewClient()` e `buildPollFds()`.
-Explique que não existe thread ou processo por cliente: todos os fds pertencem
-ao mesmo `Server` e são multiplexados pelo vetor `_pollFds`.
-
-### 8. Testes unitários auxiliares
-
-Não fazem parte da régua, mas são uma verificação rápida antes da rede:
-
-```sh
-make test
-```
-
-No estado analisado durante a última atualização deste guia, o resultado foi **609 passed,
-0 failed**. Na defesa, use o resultado obtido no clone oficial, não apenas este
-número documentado.
+> socket retornado por `accept()` não bloqueante. 
 
 ## Networking
 
@@ -415,44 +114,22 @@ No **T1**:
 ```sh
 ./ircserv 6667 secret
 ```
-
-Resultado esperado:
-
-```text
-ircserv: listening on port 6667
-```
-
-Mantenha T1 aberto durante todos os testes. Para encerramento limpo, pressione
-`Ctrl+C`; o esperado é `ircserv: shutting down`.
-
 ### 2. Confirmar escuta em todas as interfaces
 
 No **T5**, com o servidor ativo:
 
 ```sh
 ss -ltnp 'sport = :6667'
-lsof -nP -iTCP:6667 -sTCP:LISTEN
-ip -4 -brief address
 ```
 
-O endereço local deve aparecer como `0.0.0.0:6667`, e não apenas
-`127.0.0.1:6667`. Opcionalmente, conecte o `nc` usando um dos endereços não
-loopback mostrados por `ip` para provar o bind fora de localhost. Para mostrar
-no código:
-
-```sh
-nl -ba src/Server.cpp | sed -n '129,164p'
-```
-
-Resposta sugerida:
-
-> O projeto usa IPv4/TCP. `addr.sin_addr.s_addr = htonl(INADDR_ANY)` faz o
-> `bind()` em todas as interfaces, e `htons(_port)` usa exatamente a porta
-> recebida na linha de comando.
+ `0.0.0.0:6667` mostra que aceita conexoes de qualquer interface de rede.
 
 ### 3. Conectar e obter resposta com `nc`
 
-No **T4**:
+- nc (netcat): ferramenta genérica para abrir conexões TCP. Ele não entende IRC: tudo que você digita é enviado diretamente ao servidor
+
+- irssi é um cliente IRC completo de terminal. Ele entende canais, usuários, comandos, códigos numéricos e formata as mensagens para você
+
 
 ```sh
 nc -C 127.0.0.1 6667
@@ -468,32 +145,9 @@ USER carol 0 * :Carol Netcat
 JOIN #avaliacao
 ```
 
-Resultados esperados:
-
-- `PING` responde com `:ircserv PONG ircserv :teste-nc` mesmo antes do registro;
-- após `USER`, chegam os numéricos `001`, `002`, `003` e `004`;
-- `JOIN` retorna o eco do join, `331`, `353` e `366`;
-- no `353`, o primeiro criador do canal aparece com `@`.
-
-Se `carol` for a cliente auxiliar e não deve criar o canal, deixe apenas o
-registro pronto e faça Alice criar o canal primeiro no passo seguinte.
-
 ### 4. Cliente IRC de referência e conexão com irssi
 
-Pergunta da régua:
-
-> Qual é o cliente IRC de referência?
-
-Resposta:
-
-> O cliente de referência é o **irssi**. Ele está declarado no README e o
-> servidor aceita os comandos auxiliares `CAP`, `PING`, `PONG`, `WHO`, `WHOIS`,
-> `QUIT` e consultas de `MODE` que o irssi envia durante uma sessão real.
-
-Encerre o `nc` do T4 com `Ctrl+C` se ele já estiver usando `carol` e então
-inicie os clientes.
-
-No **T2**:
+**T2**:
 
 ```sh
 irssi -c 127.0.0.1 -p 6667 -w secret -n alice
@@ -539,16 +193,10 @@ JOIN #avaliacao
 PING :tres-clientes
 ```
 
-No **T2**, digite como mensagem normal na janela de `#avaliacao`:
+irssi, digite como mensagem normal na janela de `#avaliacao`:
 
 ```text
 mensagem da alice para todos
-```
-
-Bob no T3 e Carol no T4 devem receber uma linha equivalente a:
-
-```text
-:alice!<user>@127.0.0.1 PRIVMSG #avaliacao :mensagem da alice para todos
 ```
 
 No T4:
@@ -556,39 +204,6 @@ No T4:
 ```text
 PRIVMSG #avaliacao :resposta do nc com espacos
 ```
-
-Alice e Bob devem receber a mensagem. O remetente não recebe eco protocolar do
-próprio `PRIVMSG`, pois o cliente já mostra localmente o que ele digitou.
-
-Enquanto os três clientes permanecem conectados, no T5:
-
-```sh
-pgrep -af ircserv
-ps -o pid,stat,%cpu,%mem,cmd -C ircserv
-```
-
-O processo deve continuar vivo, sem bloqueio e com CPU ociosa próxima de zero
-quando ninguém está enviando dados.
-
-### 6. Onde mostrar o networking no código
-
-```sh
-nl -ba src/Server.cpp | sed -n '129,350p'
-nl -ba src/Server.cpp | sed -n '392,453p'
-nl -ba src/Server.cpp | sed -n '543,601p'
-nl -ba src/ServerChannels.cpp | sed -n '66,131p'
-nl -ba src/CommandsChannel.cpp | sed -n '425,484p'
-```
-
-Explique:
-
-- `setupListenSocket()` cria, configura, faz `bind` e `listen`;
-- `run()` atende todos os clientes no mesmo loop;
-- `handleReadable()` recebe bytes e extrai todas as linhas completas;
-- `sendToClient()` enfileira saída e `handleWritable()` consome apenas os bytes
-  efetivamente enviados;
-- `broadcastToChannel()` percorre os membros;
-- `cmdPrivmsg()` exclui o remetente do broadcast do canal.
 
 ## Situações especiais de rede
 
@@ -611,27 +226,8 @@ Faça literalmente esta sequência:
 3. digite `d` e pressione `Enter`.
 
 Não pressione `Ctrl+D` numa linha vazia, pois isso encerraria a entrada do
-`nc`. O servidor deve reconstruir **um único** comando `command` e responder
-uma única vez:
+`nc`. O servidor deve reconstruir **um único** comando `command`
 
-```text
-:ircserv 421 * COMMAND :Unknown command
-```
-
-Onde mostrar:
-
-```sh
-nl -ba src/Server.cpp | sed -n '392,453p'
-nl -ba src/Client.cpp | sed -n '245,375p'
-```
-
-Resposta sugerida:
-
-> TCP é um fluxo de bytes, não um fluxo de mensagens. Cada `Client` tem seu
-> próprio `_readBuffer`. `appendToReadBuffer()` acumula fragmentos e
-> `extractCommand()` só entrega uma linha quando encontra `\n`, removendo o
-> `\r` final quando presente. O restante incompleto permanece para o próximo
-> evento de leitura.
 
 ### 2. Um parcial não pode bloquear outras conexões
 
@@ -642,7 +238,6 @@ Enquanto isso:
 
 - no T2, Alice envia `servidor continua responsivo` em `#avaliacao`;
 - Bob deve receber imediatamente no T3;
-- no T5, confirme que o servidor está vivo com `pgrep -af ircserv`.
 
 Volte ao T4, digite `cial` e pressione Enter. O comando reconstruído é
 `PING :parcial`, e a resposta deve ser:
@@ -667,37 +262,7 @@ USER carol 0 * :Carol
 JOIN #avaliacao
 ```
 
-Para obter o PID exato de Bob, a maneira mais segura é reiniciar o T3 assim:
-
-Primeiro saia da instância atual de Bob com `/quit preparando-teste-kill`,
-volte ao shell e execute:
-
-```sh
-echo "PID que será substituído pelo irssi: $$"
-exec irssi -c 127.0.0.1 -p 6667 -w secret -n bob
-```
-
-Entre novamente em `#avaliacao`. Anote o PID mostrado. No **T5**, substitua
-`<PID_BOB>` somente por esse número previamente conferido:
-
-```sh
-ps -fp <PID_BOB>
-kill -9 <PID_BOB>
-```
-
-Esse é um encerramento inesperado, sem `QUIT`. Verifique:
-
-1. T1 registra o fechamento do fd, mas `ircserv` permanece ativo;
-2. Alice e Carol continuam trocando mensagens;
-3. abra um novo T3, reconecte Bob e faça `/join #avaliacao` novamente.
-
-No código, mostre `SIGPIPE` ignorado, `POLLHUP`/`recv == 0`, desconexão adiada
-e limpeza dos canais:
-
-```sh
-nl -ba src/Server.cpp | sed -n '109,127p;225,257p;404,453p;605,707p'
-nl -ba src/ServerChannels.cpp | sed -n '133,180p'
-```
+ctrl-c
 
 ### 4. Encerrar `nc` com metade de um comando
 
@@ -710,8 +275,6 @@ PRIVMSG #avaliacao :esta mensagem ficou pela metade
 Não pressione Enter. Pressione `Ctrl+D` uma vez para enviar o fragmento e logo
 depois `Ctrl+C` para matar o `nc`. A linha parcial não deve ser executada. No
 T2 e T3, envie novas mensagens e confirme que o servidor continua normal.
-Conecte ainda outro `nc` e envie `PING :depois-da-metade` para provar que um
-novo cliente também é aceito.
 
 ### 5. Suspender cliente, inundar canal e retomar
 
@@ -732,82 +295,16 @@ transitória:
 ) | nc -C 127.0.0.1 6667
 ```
 
-Durante o flood, Alice deve continuar responsiva. Em outro `nc` no T4:
-
-```text
-PING :durante-flood
-```
-
-O PONG deve chegar sem o servidor congelar. No T3, retome Bob:
-
-```sh
-fg
-```
-
-O irssi deve processar normalmente as mensagens acumuladas. Confira o começo
-e o fim com:
-
-```text
-/lastlog flood-001
-/lastlog flood-200
-```
-
-Não aumente o flood indefinidamente: esta implementação limita a fila por
-cliente a `65536` bytes e desconecta deliberadamente um cliente que excede
-essa fila com `ERROR :SendQ exceeded`. Esse limite protege o servidor contra
-exaustão de memória; o caso da régua deve exercitar suspensão e recuperação,
-não exceder propositalmente a SendQ.
-
-Onde mostrar o tratamento de cliente lento:
-
-```sh
-nl -ba include/Limits.hpp | sed -n '18,70p'
-nl -ba src/Client.cpp | sed -n '381,499p'
-nl -ba src/Server.cpp | sed -n '269,305p;543,601p;634,707p'
-```
-
-Explique que a fila é individual, `POLLOUT` só é armado quando necessário,
-`send()` parcial preserva o restante e uma conexão lenta não bloqueia as outras.
-Se o cliente já está sendo desconectado, o linger é limitado a três passagens;
-o timeout de 200 ms faz esse orçamento avançar mesmo se não houver `POLLOUT`.
-
 ### 6. Vazamentos de memória durante a operação
 
-Saia dos clientes com `/quit`, encerre o servidor normal com `Ctrl+C` e inicie
-uma nova execução no **T1** sob Valgrind:
-
+Encerre tudo
 ```sh
 valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes \
-    --error-exitcode=42 --log-file=/tmp/ft_irc_valgrind.log \
     ./ircserv 6667 secret
 ```
 
 Reconecte Alice e Bob nos T2/T3, entre em `#avaliacao`, repita a suspensão,
-flood controlado e `fg`. Depois:
-
-1. saia de Alice e Bob com `/quit fim-do-valgrind`;
-2. encerre o servidor com `Ctrl+C` no T1;
-3. inspecione o relatório no T5:
-
-```sh
-rg 'definitely lost|indirectly lost|possibly lost|still reachable|ERROR SUMMARY|FILE DESCRIPTORS' /tmp/ft_irc_valgrind.log
-```
-
-Resultado esperado: `definitely lost: 0 bytes`, `indirectly lost: 0 bytes` e
-`ERROR SUMMARY: 0 errors`. Memória ainda alcançável da própria ferramenta ou
-bibliotecas deve ser analisada, não simplesmente ignorada. O socket de escuta
-e os clientes devem ser fechados no encerramento.
-
-Teste automatizado equivalente, somente após revisão do script:
-
-```sh
-make
-./tests/it/full_session.sh 6719
-```
-
-Esse script utiliza outra porta, executa uma sessão completa sob Valgrind e
-espera zero erros, zero `Invalid read/write/free` e nenhum bloco definitivamente
-ou indiretamente perdido.
+flood controlado.
 
 ## Comandos básicos do cliente
 
