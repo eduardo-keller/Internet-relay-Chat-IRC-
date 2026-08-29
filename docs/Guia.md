@@ -21,24 +21,6 @@ sugestao:
 | **T4** | `nc`,  `carol`, e pacotes parciais |
 
 
-| Código | Significado |
-|---:|---|
-| `001`–`004` | registro concluído |
-| `324` | modos atuais do canal |
-| `331` / `332` | canal sem tópico / tópico atual |
-| `353` / `366` | lista de membros / fim da lista |
-| `401` | nick inexistente |
-| `403` | canal inexistente |
-| `404` | não pode enviar ao canal |
-| `411` / `412` | destinatário ausente / texto ausente |
-| `431`–`433` | erro de nickname |
-| `441` | usuário não está no canal |
-| `442` | remetente não está no canal |
-| `461` | parâmetros insuficientes |
-| `464` | senha incorreta |
-| `471` / `473` / `475` | limite / somente convite / chave incorreta |
-| `482` | não é operador do canal |
-
 # Introdução
 
 
@@ -305,7 +287,6 @@ valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes \
 
 Reconecte Alice e Bob nos T2/T3, entre em `#avaliacao`, repita a suspensão,
 flood controlado.
-
 ## Comandos básicos do cliente
 
 Reinicie o servidor normal no T1 caso ele tenha sido encerrado pelo Valgrind:
@@ -321,30 +302,13 @@ No T4:
 ```sh
 nc -C 127.0.0.1 6667
 ```
-
-Digite exatamente:
+sugestao:
 
 ```text
 PASS secret
 NICK carol
 USER carol 0 * :Carol da Avaliacao
 JOIN #basico
-```
-
-Confirme `001`–`004`, depois o `JOIN`, `331` ou `332`, `353` e `366`.
-
-Casos de erro úteis:
-
-1. uma conexão nova com `PASS errada` deve receber `464` e ser fechada;
-2. `NICK` antes de `PASS` deve receber `451`;
-3. um segundo cliente tentando `NICK carol` deve receber `433`.
-
-Onde mostrar:
-
-```sh
-nl -ba src/CommandsRegistration.cpp | sed -n '56,214p'
-nl -ba src/Client.cpp | sed -n '109,225p'
-nl -ba src/CommandsChannel.cpp | sed -n '84,259p'
 ```
 
 ### 2. Autenticação e canal com irssi
@@ -361,16 +325,16 @@ em ambos. A lista de nicks deve mostrar Alice e Bob e apenas a criadora com
 
 ### 3. `PRIVMSG` direto e texto com vários parâmetros
 
-Com Alice e Bob conectados, no irssi de Alice:
+Irssi para Irssi: com Alice e Bob conectados, no irssi de Alice:
 
 ```text
 /msg bob mensagem privada com varios espacos e : dois-pontos
 /quote PRIVMSG bob,carol :mensagem para dois destinatarios
 ```
 
-Bob deve abrir/atualizar a query e receber o primeiro texto inteiro. Na segunda
-linha, Bob e Carol recebem a mesma mensagem, cada um com o próprio nick como
-destino. Pelo protocolo cru no T4:
+ctrl-n navega entre as abas do irssi.
+
+de NC para irssi:
 
 ```text
 PRIVMSG bob :mensagem privada do nc com varios parametros
@@ -378,44 +342,19 @@ PRIVMSG #basico :texto de canal com espacos : e dois-pontos
 PRIVMSG alice,bob :mensagem do nc para uma lista de nicks
 ```
 
-O parâmetro iniciado por `:` é o trailing parameter: tudo depois dele,
-incluindo espaços e outros `:`, deve chegar intacto. A lista antes dele é
-separada por vírgulas; cada alvo válido é processado independentemente, então
-um alvo inválido não deve impedir a entrega aos demais.
-
-Teste também respostas de erro, uma linha por vez:
-
-```text
-PRIVMSG
-PRIVMSG bob
-PRIVMSG ninguem :teste
-```
-
-Resultados esperados: `411`, `412` e `401`, respectivamente. O servidor deve
-permanecer conectado após esses erros.
-
-Onde mostrar:
-
-```sh
-nl -ba src/Message.cpp | sed -n '1,140p'
-nl -ba src/CommandsChannel.cpp | sed -n '360,484p'
-nl -ba src/ServerChannels.cpp | sed -n '66,89p'
-```
-
-Resposta sugerida:
-
-> `parseMessage()` preserva o trailing parameter como um único parâmetro,
-> então espaços e dois-pontos internos não são perdidos. `cmdPrivmsg()` separa
-> a lista de destinos e processa cada canal ou nick independentemente, valida
-> erros e usa o prefixo `nick!user@host`. Para canal,
-> `broadcastToChannel()` envia a todos os outros membros; para nick,
-> `findClientByNick()` faz busca case-insensitive.
-
 ## Comandos de cliente operador de canal
 
-Esta seção deve começar com estado limpo. Saia dos clientes ainda abertos com
-`/quit`, feche os `nc` com `Ctrl+C`, encerre o servidor no T1 com `Ctrl+C` e
-inicie outra vez:
+lista de comandos:
+- `KICK` — remove um usuário do canal.
+- `INVITE` — convida um usuário para o canal.
+- `TOPIC` — consulta, define ou remove o tópico do canal.
+- `MODE i` — ativa ou desativa o modo somente para convidados.
+- `MODE t` — restringe a alteração do tópico aos operadores.
+- `MODE k` — define ou remove a senha do canal.
+- `MODE o` — concede ou remove o privilégio de operador.
+- `MODE l` — define ou remove o limite de usuários do canal.
+
+
 
 ```sh
 ./ircserv 6667 secret
@@ -484,15 +423,8 @@ No T3 (Bob):
 /quote KICK #ops alice :tentativa sem permissao
 ```
 
-Bob deve receber `482`; Alice continua no canal.
+Alice continua no canal.
 
-Repita pelo `nc` no T4:
-
-```text
-KICK #ops alice :tentativa do nc sem permissao
-```
-
-Carol também deve receber `482`.
 
 #### `MODE` negado
 
@@ -504,13 +436,7 @@ No T3:
 
 Bob deve receber `482` e o modo não deve mudar.
 
-No T4:
 
-```text
-MODE #ops +i
-```
-
-Carol também recebe `482`.
 
 #### `INVITE` negado quando `+i` está ativo
 
@@ -531,41 +457,7 @@ canal aberto; o privilégio de operador para `INVITE` é exigido quando `+i`
 torna o convite uma decisão de acesso. Por isso o teste correto ativa `+i`
 antes da tentativa do usuário normal.
 
-No T4, Carol já é membro normal e tenta convidar um nick qualquer:
 
-```text
-INVITE ninguem #ops
-```
-
-O teste de privilégio ocorre antes da procura do nick, portanto o resultado
-também deve ser `482`.
-
-#### `TOPIC` negado quando `+t` está ativo
-
-No T2:
-
-```text
-/quote MODE #ops +t
-```
-
-No T3:
-
-```text
-/quote TOPIC #ops :topico indevido do bob
-```
-
-Bob deve receber `482`, e uma consulta `TOPIC #ops` ainda mostra o tópico
-anterior ou `331`. O modo `+t` restringe **alteração**, não consulta do tópico.
-
-No T4:
-
-```text
-TOPIC #ops :topico indevido da carol
-PART #ops :fim dos testes de usuario normal
-```
-
-Carol recebe `482` para `TOPIC` e depois sai do canal, ficando disponível como
-alvo do teste de `INVITE` do operador.
 
 ### 2. `KICK` por operador
 
@@ -587,14 +479,7 @@ No T3:
 /join #ops
 ```
 
-Onde mostrar:
-
-```sh
-nl -ba src/CommandsChannel.cpp | sed -n '559,675p'
-```
-
-Explique que o handler verifica existência, membership, operador e vítima;
-transmite o KICK antes de remover a vítima e não desconecta o cliente.
+negado porque setamos o modo +i anteriormente.
 
 ### 3. `INVITE` por operador e modo `i`
 
@@ -602,38 +487,15 @@ Garanta `+i` no T2:
 
 ```text
 /quote MODE #ops +i
-/quote INVITE carol #ops
+/quote INVITE bob #ops
 ```
 
-Alice deve receber `341`; Carol no T4 recebe uma linha `INVITE`. No T4:
+bob é convidado
 
 ```text
 JOIN #ops
 ```
-
-Carol entra. Depois retire Carol para testar novamente o gate:
-
-```text
-PART #ops :vou testar o invite-only
-JOIN #ops
-```
-
-Sem novo convite, o segundo JOIN deve receber `473`. No T2, convide novamente;
-no T4, repita `JOIN #ops` e confirme sucesso. Por fim, no T2:
-
-```text
-/quote MODE #ops -i
-```
-
-Onde mostrar:
-
-```sh
-nl -ba src/CommandsChannel.cpp | sed -n '84,128p;677,763p'
-nl -ba include/Channel.hpp | sed -n '49,75p'
-```
-
-Explique que convites guardam a identidade `Client*`, sobrevivem a troca de
-nick e são consumidos apenas após JOIN bem-sucedido.
+bob entra no canal
 
 ### 4. `TOPIC` por operador e modo `t`
 
@@ -669,32 +531,13 @@ A alteração deve funcionar e ser transmitida a todos. Para limpar o tópico:
 /quote TOPIC #ops :
 ```
 
-Onde mostrar:
-
-```sh
-nl -ba src/CommandsChannel.cpp | sed -n '486,557p'
-```
-
 ### 5. `MODE i`: adicionar e remover invite-only
 
-O comportamento completo já foi demonstrado no teste de `INVITE`. Resumo
-repetível:
-
-1. Alice envia `MODE #ops +i`;
-2. Carol fora do canal envia `JOIN #ops` e recebe `473`;
-3. Alice envia `INVITE carol #ops`;
-4. Carol entra;
-5. Alice envia `MODE #ops -i`;
-6. depois de `PART`, Carol volta a entrar sem convite.
-
-Todo `MODE` aplicado deve ser transmitido para os membros, incluindo Alice.
+O comportamento completo já foi demonstrado em 3
 
 ### 6. `MODE t`: adicionar e remover restrição de tópico
 
-O comportamento completo foi demonstrado no teste de `TOPIC`:
-
-- com `+t`, Bob recebe `482` e Alice altera o tópico;
-- com `-t`, Bob também consegue alterá-lo.
+O comportamento completo foi demonstrado no teste de `TOPIC` 4:
 
 ### 7. `MODE k`: adicionar e remover chave do canal
 
@@ -707,16 +550,8 @@ Deixe Carol fora com `PART #ops`. No T2:
 No T4:
 
 ```text
-JOIN #ops
 JOIN #ops errada
 JOIN #ops chave42
-```
-
-Os dois primeiros JOINs recebem `475`; o terceiro entra. Retire Carol novamente
-no T4:
-
-```text
-PART #ops :testando menos k
 ```
 
 Remova a chave no T2:
@@ -731,8 +566,6 @@ No T4:
 JOIN #ops
 ```
 
-O JOIN sem chave funciona após `-k`. Note que esta implementação não exige o
-valor antigo como parâmetro para remover `k`.
 
 ### 8. `MODE o`: promover e rebaixar operador
 
@@ -748,19 +581,6 @@ Bob deve ganhar `@`. No T3, prove o privilégio recém-concedido:
 /quote MODE #ops +t
 ```
 
-O comando funciona. No T2:
-
-```text
-/quote MODE #ops -o bob
-```
-
-No T3:
-
-```text
-/quote MODE #ops -t
-```
-
-Agora Bob recebe `482`. Alice pode limpar `-t` no T2.
 
 ### 9. `MODE l`: adicionar e remover limite de usuários
 
@@ -808,133 +628,5 @@ No T2:
 /quote MODE #ops
 ```
 
-O servidor responde com `324` e os modos ativos. A chave é exibida apenas a
-membros do canal.
+O servidor responde com `324` e os modos ativos.
 
-Mostre a implementação completa:
-
-```sh
-nl -ba src/CommandsChannel.cpp | sed -n '765,1005p'
-nl -ba src/Channel.cpp | sed -n '137,276p'
-```
-
-Resposta sugerida:
-
-> `applyModeChanges()` primeiro exige que o remetente seja operador. Ele
-> percorre a string de modos e consome parâmetros da esquerda para a direita:
-> `+k`, `+l` e ambos os sinais de `o` recebem parâmetros; `-k`, `-l`, `i` e
-> `t` não. O `Channel` armazena flags, chave, limite, operadores e convites. O
-> resultado aplicado é transmitido ao canal, e `MODE #canal` responde `324`.
-
-### 11. Repetir todos os comandos de operador pelo `nc`
-
-A régua pede verificação com `nc` e com o cliente de referência. Os passos
-anteriores já usaram o irssi como operador e o `nc` como usuário normal. Agora
-faça Carol criar um canal separado pelo T4; por ser a primeira integrante, ela
-será operadora:
-
-No T4:
-
-```text
-JOIN #ncops
-MODE #ncops +itkl chave-nc 2
-TOPIC #ncops :Topico definido pelo nc
-INVITE dave #ncops
-```
-
-Carol deve receber/transmitir os `MODE` e `TOPIC`, e receber `341` para o
-convite. Dave está conectado no T5 desde o teste de `+l`. No T5:
-
-```text
-JOIN #ncops chave-nc
-```
-
-Dave entra porque foi convidado, forneceu a chave e há uma segunda vaga. No
-T4, teste promoção e remoção de operador:
-
-```text
-MODE #ncops +o dave
-MODE #ncops -o dave
-```
-
-No T5, Dave prova que voltou a ser usuário normal:
-
-```text
-MODE #ncops -i
-```
-
-O resultado deve ser `482`. No T4, Carol executa o KICK, convida Dave de novo
-e por fim remove os modos:
-
-```text
-KICK #ncops dave :KICK enviado pelo nc operador
-INVITE dave #ncops
-MODE #ncops -itkl
-MODE #ncops
-```
-
-Resultados esperados:
-
-- `KICK`, `INVITE`, `TOPIC` e `MODE` foram emitidos diretamente pelo `nc`;
-- os cinco modos `i`, `t`, `k`, `o` e `l` foram alterados pelo protocolo cru;
-- Dave recebeu o KICK sem ser desconectado;
-- a consulta final `MODE #ncops` retorna `324` com `+`, pois `-itkl` limpou os
-  quatro modos persistentes e `-o` já havia removido o papel de Dave.
-
-### 12. Critério final dos comandos de operador
-
-Antes de concluir, confirme cada item:
-
-- [ ] usuário normal recebeu `482` ao tentar `KICK`;
-- [ ] usuário normal recebeu `482` ao tentar `MODE`;
-- [ ] usuário normal recebeu `482` ao tentar `INVITE` sob `+i`;
-- [ ] usuário normal recebeu `482` ao tentar alterar `TOPIC` sob `+t`;
-- [ ] operador executou `KICK`;
-- [ ] operador executou `INVITE`;
-- [ ] `TOPIC` foi consultado, alterado e limpo;
-- [ ] `MODE +i` e `-i` foram demonstrados;
-- [ ] `MODE +t` e `-t` foram demonstrados;
-- [ ] `MODE +k` e `-k` foram demonstrados;
-- [ ] `MODE +o` e `-o` foram demonstrados;
-- [ ] `MODE +l` e `-l` foram demonstrados.
-- [ ] os comandos foram demonstrados pelo irssi e pelo `nc`.
-
-A régua determina dedução de um ponto para cada funcionalidade de operador que
-não funcionar.
-
-# Encerramento da avaliação
-
-Saia de cada irssi:
-
-```text
-/quit fim da avaliacao
-```
-
-Encerre cada `nc` com `Ctrl+C`. Por último, pressione `Ctrl+C` no T1. Confirme:
-
-```sh
-pgrep -af ircserv || echo 'servidor encerrado: OK'
-```
-
-Se a última execução foi sob Valgrind, confira novamente:
-
-```sh
-rg 'definitely lost|indirectly lost|ERROR SUMMARY' /tmp/ft_irc_valgrind.log
-```
-
-# Mapa rápido: pergunta do avaliador → resposta → código
-
-| Pergunta | Resposta curta | Onde mostrar |
-|---|---|---|
-| Cliente de referência? | irssi | `README.md`, Descrição/Instruções |
-| Quantos `poll()`? | um | `Server::run()` em `src/Server.cpp` |
-| Como escuta todas as interfaces? | `INADDR_ANY` | `Server::setupListenSocket()` |
-| Como evita bloqueio? | `O_NONBLOCK`, um evento/uma syscall e filas por cliente | `setupListenSocket()`, `acceptNewClient()`, `buildPollFds()` |
-| Como trata pacote parcial? | buffer individual e extração somente no `\n` | `Client::appendToReadBuffer()` e `extractCommand()` |
-| Como trata `send()` parcial? | conserva o restante na output queue | `handleWritable()` e `Client::consumeOutput()` |
-| Como trata cliente lento? | fila limitada a 65536 e `POLLOUT` sob demanda | `Limits.hpp`, `Client::queueOutput()`, `buildPollFds()` |
-| Como limpa desconexão? | marca, envia a fila somente após `POLLOUT` e fecha após esvaziar ou expirar o linger | `disconnectClient()`, `hasLingeringClients()`, `reapDisconnected()`, `sweepChannels()` |
-| Quem vira operador? | primeiro membro que cria o canal | `joinOneChannel()` |
-| Como mensagens chegam ao canal? | broadcast para todos exceto remetente | `cmdPrivmsg()` e `broadcastToChannel()` |
-| Onde ficam os comandos? | tabela de handlers | `src/CommandTable.cpp` |
-| Onde ficam modos e papéis? | objeto `Channel` | `include/Channel.hpp`, `src/Channel.cpp` |
